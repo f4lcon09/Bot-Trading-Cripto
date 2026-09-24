@@ -177,9 +177,18 @@ Com a redação fraca que os dados sustentam, e nada além dela:
 
 ## V1 — autópsia, não fundação
 
-Os arquivos `autopsia 5.py`, `futures_coletor 3.py`, `kernel_v5 5.py`,
-`maquina_do_tempo 5.py`, `minerador_ohlcv 5.py`, `sniper binance.py` e
-`sniper purista.py` são o pipeline anterior. Ficam aqui como registro.
+**Os sete arquivos `.py` da V1 neste repositório estão vazios — 0 byte
+cada.** Foram commitados como placeholders em 21/07/2026 e nunca
+preencheridos. O que existe da V1 aqui é o nome do arquivo e a descrição
+abaixo, nada mais.
+
+Isso fica registrado porque o README anterior os descrevia módulo a módulo
+como se houvesse código, e um README que documenta arquivo inexistente é o
+mesmo defeito que o resto deste projeto passou a semana corrigindo: o
+instrumento afirmando algo que não aconteceu.
+
+A descrição do que a V1 **fazia** segue abaixo por ser o que sustenta a
+decisão de não reaproveitá-la.
 
 Quatro defeitos independentes, cada um suficiente sozinho para zerar a
 conta:
@@ -220,7 +229,9 @@ cada afirmação.
 
 - **Nada aqui é recomendação de investimento.** É registro de pesquisa, e a
   pesquisa principal deu negativo.
-- **A V1 envia ordens reais.** Está marcada como autópsia por um motivo.
+- **A V1 enviava ordens reais.** O código não está neste repositório — os
+  arquivos são placeholders vazios — mas se ele for recuperado de outra
+  cópia, está marcado como autópsia por quatro motivos medidos.
 - **Alavancagem acima de 2× está fora de escopo** por decisão, e o número
   que originalmente sustentava esse teto foi retratado — a exclusão
   permanece porque não construir por falta de suporte medido continua sendo
