@@ -1,0 +1,57 @@
+# ====================================================================
+# DADOS — nunca versionados
+#
+# Os museus somam ~1 GB e sao reproduziveis a partir da fonte:
+#   python minerador_binance.py futures
+#   python minerador_binance.py spot
+#
+# Git nao e lugar para 21 milhoes de velas. O que precisa estar aqui
+# e o CODIGO que as baixa e o VALIDADOR que as recusa quando sujas.
+# ====================================================================
+museu_bin_fut/
+museu_bin_spot/
+museu_hl/
+database_holdout/
+
+# ====================================================================
+# COLETA AO VIVO — nao versionada, e este e o caso delicado
+#
+# dados_execucao/ contem open interest, funding e mark price coletados
+# minuto a minuto. Ao contrario dos museus, isto NAO e reproduzivel:
+# a Binance retem openInterestHist por 1 mes a 5 minutos, e a
+# Hyperliquid so expoe o snapshot atual. Cada minuto perdido e perdido
+# para sempre.
+#
+# Mesmo assim fica fora do git, por dois motivos:
+#   1. o poller escreve a cada minuto; versionar isso seria um commit
+#      por minuto, ou um diff gigante por dia
+#   2. commitar um diretorio sendo escrito captura escrita parcial
+#
+# Isto NAO substitui backup. Se este dado importa — e importa, e o
+# unico ativo do projeto que nao volta — ele precisa de copia fora
+# desta maquina, por outro meio.
+# ====================================================================
+dados_execucao/
+
+# ====================================================================
+# Python
+# ====================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ====================================================================
+# Credenciais — invariante 7
+#
+# Os defaults no fonte sao strings vazias lidas de variavel de
+# ambiente e continuam assim. Estas linhas existem para o caso de
+# alguem criar um arquivo local: ele nunca sobe.
+# ====================================================================
+.env
+.env.*
+*.key
+*.pem
+credenciais*.json
+config_local.py
