@@ -428,3 +428,72 @@ confirmatório é o que matou a V1.
 | efeito detectável | 1,66 a 1,76 pp |
 | unidade de agrupamento | dia |
 | design effect assumido | 1, por construção |
+
+### Fechamento do Adendo 2 — mesmo dia, ainda com zero eventos na base
+
+Duas correções feitas antes de lacrar, ambas em 2026-09-25.
+
+#### 1. O limiar: conflito resolvido, e sem Adendo 3
+
+A menção a 0,0167 ao cravar N = 15 foi **descuido de aritmética** —
+repetição do número do pré-registro original sem recontar a família
+depois que ela mudou. Não houve intenção de abandonar o pareado como
+confirmatório.
+
+**Fica 0,0125.** A inconsistência permanece registrada acima de
+propósito: é o registro honesto do que aconteceu, e apagá-la seria
+reescrever a história de uma decisão.
+
+**O cálculo de poder NÃO precisou ser refeito** — ele já havia sido feito
+a 0,0125. Verificado nos dois limiares:
+
+| janela | σ da diferença | α = 0,0167 | **α = 0,0125** |
+| --- | --- | --- | --- |
+| holdout futures | 2,05% | 1,71 pp | **1,77 pp** |
+| 0a spot | 1,92% | 1,60 pp | **1,66 pp** |
+| 0a futures | 1,97% | 1,65 pp | **1,70 pp** |
+
+`z(0,0167) = 3,235` contra `z(0,0125) = 3,339`. A faixa publicada acima
+é a de 0,0125.
+
+**Correção de arredondamento:** onde se lê "1,66 a 1,76 pp", o valor
+exato do limite superior é **1,77 pp**. A faixa correta é **1,66 a
+1,77 pp**.
+
+Com 1,77 pp de teto, N = 15 permanece: o critério declarado era que o
+efeito precisa aparecer **bem acima de 1,3 pp** se a hipótese estiver
+certa, e a margem é de 0,47 pp. O teto de reavaliação estabelecido —
+1,9 pp — não foi atingido.
+
+#### 2. As quatro células, enumeradas nominalmente
+
+"Bonferroni a 4" não é declaração de família: é conta que exige dedução
+para ser auditada. Três baldes sob dois controles dariam **seis**. O
+quatro só fecha por uma escolha de desenho, e escolha de desenho se
+escreve, não se deduz.
+
+A família é esta, e é fechada:
+
+| # | célula | esquema de controle | papel |
+| --- | --- | --- | --- |
+| 1 | `OI caindo` × `OI subindo` | não pareado, agrupado por dia | **primária** |
+| 2 | `OI caindo` × `OI estável` | não pareado, agrupado por dia | secundária |
+| 3 | `OI estável` × `OI subindo` | não pareado, agrupado por dia | secundária |
+| 4 | `OI caindo` × `OI subindo` | **pareado dentro do dia** | **confirmatória da célula 1** |
+
+**A escolha de desenho, explícita:** apenas a comparação primária é
+duplicada sob os dois esquemas de controle. As duas secundárias rodam
+sob o esquema não pareado apenas.
+
+O motivo é que a célula 4 existe para testar a robustez da célula 1 ao
+esquema de controle — que é a exigência da invariante 10 sobre amplitude
+entre controles defensáveis — e não para multiplicar comparações. Duplicar
+também as secundárias custaria duas células a mais, levando o limiar a
+0,0083, sem responder nenhuma pergunta nova.
+
+**Nada mais entra.** Horizonte único de 60 minutos. Um só limiar de ΔOI
+(±0,5%). Um só universo (os 18 majors). Outra granularidade, outro
+limiar ou outro horizonte é família nova, com o custo assumido
+explicitamente — não se acrescenta célula a esta.
+
+`0,05 / 4 = 0,0125`.
