@@ -346,6 +346,25 @@ def autoteste():
         r.append(_ok(abs(round(v, 2) - alvo) < 1e-9,
                      "%s: %s pp" % (jan, alvo), "%.4f" % v))
 
+    print(chr(10) + "10. REPRODUZ O NUMERO EM VIGOR: N=17, t EXATA")
+    # A regra de parada passou de 15 para 17 dias qualificados quando a
+    # `t` exata mostrou que N=15 atingia o teto de 1,9 pp. O bloco 9
+    # acima guarda o numero HISTORICO publicado; este guarda o VIGENTE.
+    if _st is not None:
+        pior = 0.0
+        for sig, alvo, jan in ((2.05, 1.84, "holdout futures"),
+                               (1.92, 1.73, "0a spot"),
+                               (1.97, 1.77, "0a futures")):
+            v = detectavel(_base(sigma=sig, n=17, janela_do_sigma=jan),
+                           "t").efeito
+            pior = max(pior, v)
+            r.append(_ok(abs(round(v, 2) - alvo) < 1e-9,
+                         "%s: %s pp" % (jan, alvo), "%.4f" % v))
+        r.append(_ok(pior < 1.90, "pior janela sob o teto de 1,9 pp",
+                     "%.4f" % pior))
+        r.append(_ok(detectavel(_base(n=15), "t").efeito >= 1.90,
+                     "e N=15 nao ficaria", "por isso N virou 17"))
+
     print(chr(10) + "=" * 62)
     print("%d/%d verificacoes passaram" % (sum(r), len(r)))
     print("=" * 62)
@@ -355,7 +374,7 @@ def autoteste():
 def tabela():
     print("EFEITO DETECTAVEL - DESENHO DO ADENDO 2")
     print("familia de 4 celulas, alfa 0,05, poder 80%, unidade = dia")
-    print("n = 15 dias qualificados" + chr(10))
+    print("n = 17 dias qualificados (regra de parada em vigor)" + chr(10))
 
     # Cada esquema tem o SEU sigma. O pareado consome o sigma da
     # diferenca intradiaria; o nao pareado consome o sigma diario dentro
@@ -375,7 +394,7 @@ def tabela():
         print("=" * 62)
         for jan in ("holdout futures", "0a spot", "0a futures"):
             sig = SIGMAS[jan][idx]
-            d = _base(sigma=sig, esquema=esq,
+            d = _base(sigma=sig, n=17, esquema=esq,
                       janela_do_sigma="%s, %s" % (jan, nome),
                       rotulo="%s | %s" % (rot, jan))
             for met in ("normal", "t"):

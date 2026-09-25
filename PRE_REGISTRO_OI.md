@@ -627,3 +627,125 @@ parágrafo — e não por esquecimento.
 | teto de reavaliação (1,9 pp) | **atingido** |
 | N em vigor | 15, sem alteração |
 | instrumento | `poder.py`, 36/36 no autoteste |
+
+### Fechamento do Adendo 2, parte 3 — N = 17, e a cláusula de sinais opostos
+
+Ainda 2026-09-25. Ainda **zero eventos na base**.
+
+#### 5. A regra de parada passa a ser 17 dias qualificados
+
+O teto de reavaliação de 1,9 pp foi declarado antes, disparou em duas das
+três janelas, e a resposta é **mexer no N, não no teto**.
+
+Mover o teto agora seria a operação que a primeira linha dos critérios de
+aceitação deste projeto condena — mover o limiar depois de olhar. Que o
+1,9 fosse um número arbitrário não muda nada: ele foi escrito antes, e a
+correção que o derrubou chegou pelo lado inconveniente. O momento em que
+a medição fica mais honesta é exatamente o momento em que relaxar o
+critério é mais tentador.
+
+**Por que isto não é espiar:** não há um único evento na base. A correção
+é sobre a **fórmula do poder**, não sobre resultado. Ajustar N a partir
+de uma correção de método, antes de qualquer dado, é legítimo e é a
+direção conservadora; ajustar o teto seria a mesma operação na direção
+oposta.
+
+| N | célula 4, `t` exata | crítico | teto de 1,9 pp |
+| --- | --- | --- | --- |
+| 15 | 1,87 a 1,99 pp | t(14) = 2,8640 | **atingido** |
+| **17** | **1,73 a 1,84 pp** | t(16) = 2,8131 | respeitado, folga de 0,06 pp |
+
+Por janela, a N = 17: 1,73 pp no 0a spot, 1,77 pp no 0a futures, 1,84 pp
+no holdout futures.
+
+**Custo no calendário**, pela mesma taxa de dias qualificados por dia
+corrido usada acima — a taxa é constante, então o calendário escala
+linear com N:
+
+| cobertura | 15 dias | **17 dias** | custo |
+| --- | --- | --- | --- |
+| 37% (atual) | 9,6 meses | **10,9 meses** | +39 dias |
+| 60% | 6,1 meses | 6,9 meses | +25 dias |
+| 100% | 4,2 meses | 4,8 meses | +17 dias |
+
+Seis semanas sobre um horizonte de dez meses. **N = 17 substitui N = 15
+em todo este documento**, inclusive nas tabelas de integridade acima, que
+ficam como estão pelo mesmo motivo que o 1,76 ficou: o registro anterior
+não se apaga, se corrige por adendo.
+
+#### 6. A família continua em 4, e a célula 1 continua consumindo alfa
+
+Reduzir a família a uma célula — já que só a 4 decide — é estreitamento
+que parece limpeza e é seleção. A célula 1 continua podendo produzir uma
+afirmação confirmatória própria, e rebaixá-la **depois** de descobrir que
+ela é a fraca é narrowing pós-hoc que por acaso ajuda.
+
+Manter 0,0125 é o preço de ter declarado quatro células antes de saber
+qual seria a forte. `0,05 / 4 = 0,0125` segue valendo.
+
+#### 7. Sinais opostos: inconclusivo declarado
+
+A hierarquia resolve "uma cruza e a outra não" — isso é diferença de
+poder, e está medido. Ela **não** resolve estimativas com sinais opostos,
+e lida ao pé da letra chamaria isso de positivo.
+
+Sinais opostos não são assimetria de poder. São a situação literal que a
+emenda da invariante 10 descreve: um efeito que troca de sinal conforme o
+controle escolhido **não é medida, é escolha**.
+
+**A tabela de decisão completa, que substitui a da parte 2:**
+
+| célula 4 (pareada) | estimativa pontual da célula 1 | veredito |
+| --- | --- | --- |
+| cruza 0,0125, na direção da tese | mesmo sinal, ou zero | **positivo** |
+| cruza 0,0125, na direção da tese | **estritamente oposta** | **inconclusivo declarado** |
+| cruza 0,0125, contra a tese | qualquer | **negativo**, e reportado alto |
+| não cruza | qualquer | **negativo** |
+
+No inconclusivo declarado, **a amplitude entre os controles é o
+resultado** — não um pé de página de um resultado. A conclusão publicável
+é "o efeito depende do esquema de controle", com as duas estimativas e os
+dois erros padrão lado a lado, e nenhuma das duas promovida a principal.
+
+O critério é o **sinal**, sem limiar de magnitude. Um limiar de magnitude
+seria mais um parâmetro livre, e parâmetro livre é o que se ajusta depois.
+
+**O que isso custa, medido.** A célula 1 é imprecisa — erro padrão de
+0,62 a 0,80 pp a N = 17 — então ela pode cair do lado negativo por ruído
+mesmo com efeito verdadeiro positivo:
+
+| efeito verdadeiro | P(estimativa da célula 1 sair negativa) |
+| --- | --- |
+| 1,0 pp | 5,3% a 10,5% |
+| 2,0 pp | 0,06% a 0,62% |
+| 3,0 pp | praticamente zero |
+
+A cláusula só é consultada quando a célula 4 já cruzou, o que exige um
+efeito observado perto de 1,8 pp ou mais; e as duas estimativas são
+positivamente correlacionadas por virem dos mesmos dias, o que empurra a
+probabilidade conjunta para baixo da marginal acima. **A correlação não
+é conhecida sem os dados** e não está estimada aqui.
+
+A leitura: a cláusula é barata onde importa, e cara exatamente na faixa
+de efeito fraco — que é a faixa onde declarar inconclusivo é a resposta
+certa.
+
+#### Uma linha acrescentada por conta própria
+
+A terceira linha da tabela — célula 4 cruzando **contra** a tese — não
+estava na proposta. O teste é bicaudal a 0,0125, então cruzar na direção
+oposta é resultado possível, e a regra escrita sem essa linha o chamaria
+de positivo por omissão. Está marcada aqui para poder ser riscada.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-25 |
+| eventos na base nesta data | **zero** |
+| regra de parada | **17 dias qualificados** (substitui 15) |
+| efeito detectável, `t` exata | **1,73 a 1,84 pp** |
+| teto de 1,9 pp | respeitado |
+| família | 4 células, α = 0,0125 |
+| sinais opostos | inconclusivo declarado, amplitude como resultado |
+| calendário a 37% de cobertura | 10,9 meses |
