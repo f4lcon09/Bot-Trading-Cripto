@@ -497,3 +497,133 @@ limiar ou outro horizonte é família nova, com o custo assumido
 explicitamente — não se acrescenta célula a esta.
 
 `0,05 / 4 = 0,0125`.
+
+### Fechamento do Adendo 2, parte 2 — a regra de decisão, e uma correção de método
+
+Ainda 2026-09-25. Ainda **zero eventos na base**.
+
+Enumerar as quatro células expôs um buraco que nenhuma das duas partes
+havia nomeado: **não existia regra de decisão para quando a célula 1 e a
+célula 4 discordarem.** As duas testam a mesma comparação sob controles
+diferentes. O adendo dizia o que *reportar* — a amplitude, como a
+invariante 10 exige — mas reportar não é decidir, e "reportar os dois e
+ver no que dá" é, na prática, escolher depois de olhar. É a estrutura
+exata do casamento por σ contra o pareamento por dia, onde `t` variou de
+0,05 a 2,10 e o veredito acabou dependendo de qual esquema alguém decidiu
+chamar de o certo.
+
+#### 3. A regra: hierárquica, com a pareada decisiva
+
+**A célula 4 decide. As células 1, 2 e 3 são contexto.**
+
+| célula 4 (pareada) | veredito | o que as células 1–3 fazem |
+| --- | --- | --- |
+| cruza 0,0125 | **positivo** | entram no relatório como amplitude entre controles |
+| não cruza | **negativo** | idem — inclusive se a célula 1 cruzar |
+
+O motivo é que foi o pareamento dentro do dia que sobreviveu à autópsia:
+foi ele que deu `t = 2,10` quando o casamento por σ desmontou, e é o
+único esquema cujo defeito já foi procurado e não encontrado.
+
+**Uma célula 1 que cruza com uma célula 4 que não cruza é negativo.** A
+pareada é o teste mais sensível dos dois (ver a tabela abaixo); um sinal
+que aparece só no esquema menos sensível é sinal de problema no controle,
+não de efeito.
+
+#### A contradição na formulação, e por que ela foi resolvida assim
+
+A regra foi proposta como "a pareada decide, a não pareada é contexto;
+**discordância é negativo**". As duas metades se contradizem no caso
+assimétrico — célula 1 não cruza, célula 4 cruza. Pela primeira metade é
+positivo; pela segunda é negativo. E se discordância for sempre negativo,
+a regra hierárquica e a conjuntiva viram **a mesma tabela de decisão**, e
+escolher entre elas deixa de decidir qualquer coisa.
+
+Resolvido pela hierárquica pura — o caso assimétrico é **positivo** — por
+medida, não por preferência:
+
+| esquema | efeito detectável, N = 15, α = 0,0125, t exata |
+| --- | --- |
+| célula 4, pareada | **1,87 a 1,99 pp** |
+| célula 1, não pareada | **2,33 a 3,01 pp** |
+
+Para a célula 1 enxergar 1,9 pp seriam precisos **22 a 36 dias por
+grupo**. Exigir que ela acompanhe é fazer o veredito depender do teste
+mais cego da família: com um efeito verdadeiro perto de 2 pp, a pareada
+o vê e a não pareada o perde com frequência alta, e a regra conjuntiva
+transformaria **assimetria de poder em veredito negativo**.
+
+Esta é a única cláusula deste adendo escrita contra a redação original da
+proposta. Reverter custa uma linha — mas custa junto o argumento acima.
+
+#### O rótulo agora está invertido, e fica registrado
+
+A célula 4 está rotulada **confirmatória** e é a que decide. A célula 1
+está rotulada **primária** e não decide. A tabela das quatro células
+permanece como está: renomear depois de ver a regra seria arrumar o
+registro em vez de registrá-lo. Onde os dois textos divergirem, **a regra
+de decisão manda sobre o rótulo**.
+
+#### 4. O cálculo de poder estava otimista — normal contra t
+
+O `poder.py`, escrito hoje com autoteste, mediu um defeito no próprio
+cálculo publicado acima: a fórmula `(z + z) × σ / √n` supõe **σ
+conhecido**. Com N = 15 ele não é. O valor crítico vem da `t` com 14
+graus de liberdade.
+
+| esquema | valor crítico | efeito detectável, N = 15 |
+| --- | --- | --- |
+| normal, σ conhecido | z = 2,4977 | 1,66 a 1,77 pp |
+| **t exata, gl = 14** | **t = 2,8640** | **1,87 a 1,99 pp** |
+
+São **+12,8%**. O número publicado acima — 1,66 a 1,77 pp — está
+**otimista**, e fica registrado como tal em vez de ser apagado.
+
+**Isto aciona o teto de reavaliação declarado de 1,9 pp**, em duas das
+três janelas (1,99 no holdout futures, 1,92 no 0a futures; o 0a spot fica
+em 1,87). A distância até a referência de 1,3 pp cresce de 0,47 para
+**0,69 pp**.
+
+Para restaurar a condição declarada, agora pela `t` exata:
+
+| alvo | N pareado necessário (pior janela) |
+| --- | --- |
+| 1,90 pp — o teto | **17 dias qualificados** |
+| 1,77 pp — o publicado | 19 dias qualificados |
+| 1,30 pp — a referência | 31 dias qualificados |
+
+**N = 15 permanece em vigor até decisão em contrário**, registrada aqui.
+A regra de parada não muda por medição que o projeto fez sobre si mesmo
+sem decisão explícita — mas a medição fica escrita, com o teto marcado
+como atingido.
+
+#### Duas saídas convenientes, recusadas por escrito
+
+A descoberta de que o desenho é mais cego que o declarado cria pressão
+por dois remendos que restaurariam N = 15 sem coletar um dia a mais:
+
+1. **Continuar reportando a aproximação normal.** Ela dá 1,77 pp e cabe
+   sob o teto. É a `t` que está certa a N = 15.
+2. **Reduzir a família a uma célula**, já que só a 4 decide, levando α de
+   0,0125 para 0,05 e o detectável para baixo. As células 1–3 continuam
+   sendo testes declarados e reportados; afrouxar a correção logo depois
+   de descobrir a falta de poder é escolher o limiar pelo resultado que
+   ele produz.
+
+**Fica 0,0125, e fica a `t` exata.** Os dois remendos estão escritos aqui
+para que, se um dia forem adotados, seja preciso adotá-los contra este
+parágrafo — e não por esquecimento.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-25 |
+| eventos na base nesta data | **zero** |
+| regra de decisão | hierárquica, célula 4 decisiva |
+| caso assimétrico | positivo |
+| método de poder | `t` exata, gl = 14 |
+| efeito detectável corrigido | **1,87 a 1,99 pp** |
+| teto de reavaliação (1,9 pp) | **atingido** |
+| N em vigor | 15, sem alteração |
+| instrumento | `poder.py`, 36/36 no autoteste |

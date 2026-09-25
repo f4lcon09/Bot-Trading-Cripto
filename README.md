@@ -91,6 +91,7 @@ são reproduzíveis, então precisam de backup por outro meio.
 python validacao_contexto.py    # porteiro dos CSVs do poller
 python teste_detectores.py      # Gate 1b
 python invariante10.py          # autoteste dos guardas estatísticos
+python poder.py --autoteste     # autoteste do cálculo de poder
 python fisica_v2.py             # autoteste do dimensionamento
 ```
 
@@ -105,6 +106,7 @@ python fisica_v2.py             # autoteste do dimensionamento
 | `fisica_v2.py` | dimensionamento; `max_safe_leverage` rebaixada a diagnóstico |
 | `relogio.py` | grava em UTC, reporta nos dois fusos |
 | `invariante10.py` | guardas estatísticos executáveis |
+| `poder.py` | efeito detectável; recusa calcular sem pressuposto declarado |
 | `minerador_binance.py` | museu de futures e spot, via ZIP mensal |
 | `minerador_hl.py` | acúmulo prospectivo da Hyperliquid |
 | `coletor_contexto.py` | poll de OI/funding/mark, 1×/minuto |
@@ -112,6 +114,7 @@ python fisica_v2.py             # autoteste do dimensionamento
 | `validacao.py` / `validacao_contexto.py` | porteiros |
 | `analise.py` / `paridade_venue.py` | Gates 0a, 0 e 0b |
 | `teste_detectores.py` | Gate 1b |
+| `cobertura.py` | cobertura por hora UTC, contra o dia de 1440 minutos |
 | `PRE_REGISTRO_OI.md` | pré-registro lacrado, com adendo datado |
 
 ---
