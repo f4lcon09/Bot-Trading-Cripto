@@ -358,6 +358,54 @@ def impressao_do_diretorio(caminho):
     return fora
 
 
+def teste_agregacao_obrigatoria():
+    """
+    `medir()` recusa rodar sem a unidade de contagem declarada.
+
+    Este bloco existe por causa de uma armadilha carregada: `medir()`
+    tinha `agregacao` implicita em "evento", que e o certo para
+    reaplicar a tese e o errado para tudo que for novo. Quem escrevesse
+    o teste de OI importaria `medir()` porque ela existe e funciona, e
+    herdaria por omissao a contagem de eventos correlacionados como
+    independentes - a primeira causa da morte da tese, reencarnada
+    dentro do teste escrito para nao repeti-la.
+
+    O Adendo 2 declara que o teste de OI agrega por dia. Declaracao em
+    documento nao segura; o `raise` segura. Este bloco garante que o
+    `raise` continua la depois de qualquer refatoracao.
+    """
+    print(chr(10) + "9. AGREGACAO OBRIGATORIA EM medir()")
+    import inspect
+
+    import analise
+
+    try:
+        analise.medir("bin_fut", ["BTC"], 0, 10 ** 14, "x")
+        checar("medir() sem agregacao levanta excecao", False,
+               "rodou com padrao - a armadilha voltou")
+    except analise.AgregacaoNaoDeclarada:
+        checar("medir() sem agregacao levanta excecao", True,
+               "AgregacaoNaoDeclarada")
+    except TypeError:
+        checar("medir() sem agregacao levanta excecao", True,
+               "TypeError de argumento faltando")
+
+    try:
+        analise.medir("bin_fut", ["BTC"], 0, 10 ** 14, "x", agregacao="mes")
+        checar("medir() recusa agregacao desconhecida", False, "aceitou 'mes'")
+    except analise.AgregacaoNaoDeclarada:
+        checar("medir() recusa agregacao desconhecida", True)
+
+    padrao = inspect.signature(analise.medir).parameters["agregacao"].default
+    checar("o parametro nao tem padrao util", padrao is None,
+           "default=%r" % (padrao,))
+
+    fonte = inspect.getsource(analise.main)
+    n = fonte.count('agregacao="evento"')
+    checar("as chamadas de analise.py declaram 'evento' explicitamente",
+           n >= 1, "%d chamada(s) explicita(s)" % n)
+
+
 def main():
     print("GATE 1b - cada detector consegue disparar?")
     print("Nao basta ficar quieto: um detector que nunca disparou em teste")
@@ -372,7 +420,8 @@ def main():
     from config import DIR_EXECUCAO
     antes = impressao_do_diretorio(DIR_EXECUCAO)
 
-    for fn in (teste_duplicata, teste_validador_contexto,
+    for fn in (teste_agregacao_obrigatoria,
+               teste_duplicata, teste_validador_contexto,
                teste_lacuna_contexto, teste_pulso_execucao,
                teste_mercado_invalido, teste_invariante10,
                teste_sobreposicao_falhas):
@@ -384,7 +433,7 @@ def main():
             traceback.print_exc()
             FALHAS.append(fn.__name__)
 
-    print(chr(10) + "8. ISOLAMENTO DO PROPRIO TESTE")
+    print(chr(10) + "10. ISOLAMENTO DO PROPRIO TESTE")
     depois = impressao_do_diretorio(DIR_EXECUCAO)
     tocados = sorted(set(depois) - set(antes)) +               sorted(k for k in set(antes) & set(depois) if antes[k] != depois[k])
     checar("nenhum arquivo de producao foi tocado", not tocados,

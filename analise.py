@@ -25,6 +25,8 @@ ajusta a faixa do gatilho e tenta de novo.
 import json
 import os
 import sys
+from collections import defaultdict
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -172,7 +174,7 @@ def analisar_simbolo(chave, sym, inicio_ms, fim_ms):
             "mfe": mfe,
         })
 
-    bench = []
+    bench, bench_t = [], []
     n = len(c)
     for k in range(0, n - HORIZONTE_MIN, PASSO_BENCHMARK):
         j = k + HORIZONTE_MIN
@@ -180,36 +182,117 @@ def analisar_simbolo(chave, sym, inicio_ms, fim_ms):
             continue
         if c[k] > 0:
             bench.append(float(c[j] / c[k] - 1.0))
+            bench_t.append(int(t[k]))
 
-    return eventos, np.array(bench), descartados
+    # O 4o valor existe para que o benchmark possa ser agrupado por dia
+    # junto com os eventos. Sem carimbo de tempo, `agregacao="dia"` teria
+    # que comparar media diaria de evento contra media empilhada de
+    # benchmark - duas unidades diferentes dentro do mesmo alpha.
+    return eventos, np.array(bench), descartados, np.array(bench_t)
 
 
-def medir(chave, aprovados, inicio_ms, fim_ms, rotulo):
-    """Roda a medicao numa superficie e devolve o resumo agregado."""
-    todos, benches, descartados = [], [], 0
+AGREGACOES = ("evento", "dia")
+
+
+class AgregacaoNaoDeclarada(Exception):
+    """
+    `medir()` foi chamada sem dizer o que ela esta contando.
+
+    Nao ha valor padrao de proposito. Um padrao aqui e a forma canonica
+    de defeito silencioso deste projeto: o padrao certo para reaplicar a
+    tese e o padrao ERRADO para qualquer teste novo, e quem escrever o
+    proximo arquivo herdaria a escolha errada por omissao - sem erro,
+    sem aviso, com numero plausivel.
+
+    Contar eventos correlacionados como independentes foi a primeira
+    causa da morte da tese (design effect medido de 3,51 a 7,45). O
+    Adendo 2 do PRE_REGISTRO_OI declara que o teste de OI agrega POR
+    DIA, nas quatro celulas. Declaracao em documento nao segura: isto
+    aqui segura.
+
+    Escreva `agregacao="evento"` e assuma, ou `agregacao="dia"` e esteja
+    certo. Ninguem herda por omissao.
+    """
+
+
+def _dia_utc(ms):
+    return datetime.fromtimestamp(ms / 1000.0, timezone.utc).strftime("%Y%m%d")
+
+
+def _medias_diarias(ts, vals):
+    """[(ts_ms, valor)] -> array com uma media por dia UTC."""
+    por_dia = defaultdict(list)
+    for t, v in zip(ts, vals):
+        por_dia[_dia_utc(int(t))].append(float(v))
+    return np.array([float(np.mean(v)) for v in por_dia.values()])
+
+
+def medir(chave, aprovados, inicio_ms, fim_ms, rotulo, agregacao=None):
+    """
+    Resumo agregado de uma superficie.
+
+    `agregacao` e OBRIGATORIA e nao tem padrao (ver AgregacaoNaoDeclarada):
+
+      "evento" - cada evento vale um. Correto para REAPLICAR a tese, que
+                 foi medida assim; errado para qualquer coisa nova,
+                 porque conta eventos correlacionados como independentes.
+      "dia"    - cada dia UTC vale um, evento e benchmark agrupados na
+                 mesma unidade. E o que o Adendo 2 exige do teste de OI.
+
+    MAE e MFE continuam em nivel de EVENTO nas duas agregacoes: sao
+    estatisticas de distribuicao de excursao, e "mediana das medianas
+    diarias" nao e uma medida de drawdown.
+    """
+    if agregacao is None:
+        raise AgregacaoNaoDeclarada(
+            "medir() exige agregacao=%s, sem padrao. "
+            "Veja AgregacaoNaoDeclarada." % (" ou ".join(map(repr,
+                                                             AGREGACOES)),))
+    if agregacao not in AGREGACOES:
+        raise AgregacaoNaoDeclarada(
+            "agregacao=%r desconhecida; use %s"
+            % (agregacao, " ou ".join(map(repr, AGREGACOES))))
+
+    todos, benches, bench_ts, descartados = [], [], [], 0
     por_simbolo = {}
 
     for sym in aprovados:
-        ev, bench, desc = analisar_simbolo(chave, sym, inicio_ms, fim_ms)
+        ev, bench, desc, bts = analisar_simbolo(chave, sym, inicio_ms, fim_ms)
         descartados += desc
         todos.extend(ev)
         if len(bench):
             benches.append(bench)
-        rets = np.array([e["ret_60m"] for e in ev]) if ev else np.array([])
+            bench_ts.append(bts)
+        if ev:
+            r_ev = np.array([e["ret_60m"] for e in ev])
+            if agregacao == "dia":
+                r_ev = _medias_diarias([e["t"] for e in ev], r_ev)
+        else:
+            r_ev = np.array([])
         por_simbolo[sym] = {
             "n": len(ev),
-            "ret_medio": float(rets.mean()) if len(rets) else 0.0,
-            "win_rate": float((rets > 0).mean()) if len(rets) else 0.0,
+            "n_unidades": int(len(r_ev)),
+            "ret_medio": float(r_ev.mean()) if len(r_ev) else 0.0,
+            "win_rate": float((r_ev > 0).mean()) if len(r_ev) else 0.0,
             "bench": float(bench.mean()) if len(bench) else 0.0,
         }
 
     if not todos:
         return None
 
-    rets = np.array([e["ret_60m"] for e in todos])
     maes = np.array([e["mae"] for e in todos])
     mfes = np.array([e["mfe"] for e in todos])
-    bench_todos = np.concatenate(benches) if benches else np.array([0.0])
+    b_vals = np.concatenate(benches) if benches else np.array([0.0])
+    b_ts = np.concatenate(bench_ts) if bench_ts else np.array([0])
+
+    if agregacao == "evento":
+        rets = np.array([e["ret_60m"] for e in todos])
+        bench_u = b_vals
+    else:
+        rets = _medias_diarias([e["t"] for e in todos],
+                               [e["ret_60m"] for e in todos])
+        bench_u = _medias_diarias(b_ts, b_vals)
+
     positivos = [s for s, d in por_simbolo.items()
                  if d["n"] > 0 and d["ret_medio"] > 0]
     com_eventos = [s for s, d in por_simbolo.items() if d["n"] > 0]
@@ -217,12 +300,14 @@ def medir(chave, aprovados, inicio_ms, fim_ms, rotulo):
     return {
         "rotulo": rotulo,
         "superficie": chave,
-        "n": len(todos),
-        "n_bench": len(bench_todos),
+        "agregacao": agregacao,
+        "n": len(rets),
+        "n_eventos": len(todos),
+        "n_bench": len(bench_u),
         "descartados": descartados,
         "ret_medio": float(rets.mean()),
-        "benchmark": float(bench_todos.mean()),
-        "alpha": float(rets.mean() - bench_todos.mean()),
+        "benchmark": float(bench_u.mean()),
+        "alpha": float(rets.mean() - bench_u.mean()),
         "win_rate": float((rets > 0).mean()),
         "mae_mediano": float(np.median(maes)),
         "mae_p25": float(np.percentile(maes, 25)),
@@ -330,7 +415,14 @@ def main(argv):
     print(f"  gatilho [-3.0%, -1.5%] 1m | saida {HORIZONTE_MIN} min | "
           f"sem stop | benchmark a cada {PASSO_BENCHMARK} min")
 
-    res = medir(chave, aprovados, inicio, fim, chave_gate)
+    # agregacao="evento" e DELIBERADA aqui: este arquivo reaplica o
+    # procedimento da tese sem alterar um parametro, e a tese foi
+    # medida empilhando eventos. E tambem o defeito que a matou - o
+    # design effect de 3,51 a 7,45 mora exatamente nesta escolha.
+    # Reproduzir o erro para poder exibi-lo e o proposito do Gate 0a.
+    # Qualquer analise NOVA usa agregacao="dia".
+    res = medir(chave, aprovados, inicio, fim, chave_gate,
+                agregacao="evento")
     if res is None:
         print("\nERRO: zero eventos na janela.")
         return 2
@@ -356,10 +448,14 @@ def main(argv):
             # O VEREDITO continua sobre os aprovados de futures; o que
             # roda na intersecao e so a tabela de comparacao.
             comuns = [s for s in aprovados if s in apr_spot]
-            controle = medir("bin_spot", comuns, inicio, fim, "spot")
+            # idem: o controle de encanamento tem que ser medido do
+            # MESMO jeito que a tese, ou nao e controle.
+            controle = medir("bin_spot", comuns, inicio, fim, "spot",
+                             agregacao="evento")
             if len(comuns) != len(aprovados):
                 fut_comuns = medir("bin_fut", comuns, inicio, fim,
-                                   "futures_intersecao")
+                                   "futures_intersecao",
+                                   agregacao="evento")
                 fora = [s for s in aprovados if s not in apr_spot]
                 print(f"\n  Intersecao de {len(comuns)} simbolos para a "
                       f"comparacao; fora do spot: {fora}.")

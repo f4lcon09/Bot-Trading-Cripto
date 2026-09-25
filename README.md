@@ -114,7 +114,7 @@ python fisica_v2.py             # autoteste do dimensionamento
 | `coletor_contexto.py` | poll de OI/funding/mark, 1×/minuto |
 | `coletor_execucao.py` | slippage pelo livro, snapshots escalonados |
 | `validacao.py` / `validacao_contexto.py` | porteiros |
-| `analise.py` / `paridade_venue.py` | Gates 0a, 0 e 0b |
+| `analise.py` / `paridade_venue.py` | Gates 0a, 0 e 0b; `medir()` exige `agregacao` explícita |
 | `teste_detectores.py` | Gate 1b |
 | `cobertura.py` | cobertura por hora UTC, contra o dia de 1440 minutos |
 | `PRE_REGISTRO_OI.md` | pré-registro lacrado, com adendo datado |
@@ -144,6 +144,11 @@ conforme o controle escolhido **não é medida, é escolha**.
 `invariante10.py` torna isso executável: não há construtor de `Medida` sem
 unidade de agrupamento declarada, e `analise.py` recusa julgar gate sem
 família de busca selada.
+
+E `medir()` **não tem agregação padrão**. Quem chama escreve
+`agregacao="evento"` e assume, ou `agregacao="dia"` e está certo —
+ninguém herda a escolha errada por omissão. O padrão antigo era "evento",
+correto para reaplicar a tese e errado para qualquer análise nova.
 
 ### 11 — ausência de medição nunca é medição de zero
 

@@ -988,3 +988,104 @@ custo, não permissão para afrouxá-la.
 | verificação | no código, com autoteste que separa as definições |
 | custo da cláusula | 0,014% a 0,738%, conforme a fração não qualificada |
 | instrumento | `correlacao_controles.py`, 23/23 |
+
+### Fechamento do Adendo 2, parte 6 — a armadilha desarmada no código
+
+Ainda 2026-09-25. Ainda **zero eventos na base**.
+
+#### 13. `medir()` perdeu o padrão
+
+`analise.medir()` agregava por evento **por omissão**. Esse padrão é
+correto para reaplicar a tese — ela foi medida assim — e errado para
+qualquer coisa nova. Quem escrevesse o teste de OI daqui a alguns meses
+importaria `medir()` porque ela existe, funciona e é a função que todos
+usam, e herdaria a contagem de eventos correlacionados como independentes
+sem erro, sem aviso e com número plausível.
+
+O Adendo 2 já declarava que o teste de OI agrega por dia. **Declaração em
+documento não segura** — a própria invariante 10 tem escrito nela que as
+nove primeiras quebram sozinhas e a décima é prosa. O `raise` segura.
+
+| antes | depois |
+| --- | --- |
+| `medir(..., rotulo)` → agrega por evento | `medir(..., rotulo, agregacao=...)` |
+| padrão implícito | **sem padrão**; `AgregacaoNaoDeclarada` |
+
+Quem chama escreve `agregacao="evento"` e assume, ou `agregacao="dia"` e
+está certo. As chamadas existentes no `analise.py` ganharam o `"evento"`
+explícito, com o comentário de que ali é deliberado: aquele arquivo
+reproduz o erro para poder exibi-lo, e é esse o propósito do Gate 0a.
+
+**Guardado por teste, não por parágrafo.** O Gate 1b ganhou o bloco 9,
+que verifica quatro coisas: que a chamada sem agregação levanta exceção,
+que agregação desconhecida é recusada, que o parâmetro continua sem
+padrão útil, e que o `analise.py` declara `"evento"` explicitamente. Se
+alguém reintroduzir o padrão numa refatoração, o Gate 1b reprova.
+
+**Verificação de que nada se moveu:** Gate 0a e Gate 0 reproduzem saída
+idêntica à anterior, byte a byte. O veredito APROVADO/REPROVADO, o n, o
+alpha e o win rate são os mesmos.
+
+#### O que a agregação por dia mostra, medido agora que ela existe
+
+Com a opção implementada, a mesma janela pode ser medida nas duas
+unidades. Não era possível antes, porque a unidade era implícita:
+
+| janela | agregação | n | alpha | win rate |
+| --- | --- | --- | --- | --- |
+| 0a in-sample | evento | 499 | **+1,712%** | 72,9% |
+| 0a in-sample | **dia** | 67 | **+0,501%** | 65,7% |
+| holdout | evento | 253 | **+0,303%** | 59,3% |
+| holdout | **dia** | 72 | **+0,123%** | 52,8% |
+
+*(alpha por dia = média, nos dias com evento, da média diária do evento,
+menos a média das médias diárias do benchmark. Evento e benchmark na
+mesma unidade — foi para isso que `analisar_simbolo` passou a devolver o
+carimbo de tempo do benchmark.)*
+
+**Isto não é retratação nova.** O veredito do Gate 0a foi dado sobre o
+procedimento empilhado, de propósito, para replicar a tese; e a reanálise
+já dizia que agrupado por dia o `t` caía de 3,97 para 1,76–1,98. O que
+não existia era a **estimativa pontual** sob contagem correta.
+
+Ela é **+0,501% in-sample**, não +1,712%. O fator de 3,4× é o peso dos
+dias pesados — 28% dos eventos in-sample caíram em 10/out/2025.
+
+E o win rate do holdout agregado por dia é **52,8%**. O pré-registro cita
+o "51,7% de WR" da V1 como o exemplo do que não se deve fazer. Os dois
+números estão a 1,1 ponto um do outro.
+
+#### 14. A dívida da invariante 10, declarada e não resolvida
+
+A parte 5 registrou que esta família **não satisfaz** a exigência de
+amplitude entre controles genuinamente diferentes, e que nenhuma célula
+seria acrescentada. Isso foi decisão, não conserto, e o que ela deixa em
+aberto precisa ter nome:
+
+> **Se em 2027 o resultado der positivo pela célula 4, alguém vai
+> perguntar como ele se comporta sob casamento por σ. A resposta honesta
+> será: não foi testado, de propósito, porque a célula custaria alfa e a
+> decisão foi tomada e registrada em 2026-09-25.**
+
+Está escrito agora para que seja **dívida declarada** e não buraco
+descoberto depois. A diferença entre as duas coisas é inteira a data em
+que a frase foi escrita.
+
+O casamento por σ é o candidato óbvio justamente porque foi ele que
+desmontou na autópsia — `t` de 0,05 a 2,10 conforme o esquema. Quem
+quiser fechar esta dívida no futuro acrescenta a célula **antes** de
+olhar o resultado, e paga o alfa. Acrescentá-la depois é a mesma operação
+que criou a 79ª célula da tese.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-25 |
+| eventos na base nesta data | **zero** |
+| `medir()` | sem padrão de agregação; `AgregacaoNaoDeclarada` |
+| guarda | Gate 1b, bloco 9, quatro verificações |
+| Gates 0a e 0 | saída idêntica à anterior |
+| alpha in-sample por dia | **+0,501%** (era +1,712% empilhado) |
+| alpha holdout por dia | **+0,123%** (era +0,303% empilhado) |
+| dívida da invariante 10 | declarada, não resolvida |

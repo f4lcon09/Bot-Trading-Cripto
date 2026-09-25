@@ -86,7 +86,7 @@ def eventos(chave, inicio, fim):
     """Eventos do museu, com dia UTC. Sem OI, sem dado ao vivo."""
     fora = []
     for sym in MAJORS:
-        evs, _, _ = analisar_simbolo(chave, sym, inicio, fim)
+        evs, _, _, _ = analisar_simbolo(chave, sym, inicio, fim)
         for e in evs:
             fora.append({"dia": dia_utc(e["t"]), "sigma": e["sigma"],
                          "gatilho": e["ret_gatilho"],
