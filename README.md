@@ -92,6 +92,7 @@ python validacao_contexto.py    # porteiro dos CSVs do poller
 python teste_detectores.py      # Gate 1b
 python invariante10.py          # autoteste dos guardas estatísticos
 python poder.py --autoteste     # autoteste do cálculo de poder
+python correlacao_controles.py --autoteste   # autoteste da correlação
 python fisica_v2.py             # autoteste do dimensionamento
 ```
 
@@ -107,6 +108,7 @@ python fisica_v2.py             # autoteste do dimensionamento
 | `relogio.py` | grava em UTC, reporta nos dois fusos |
 | `invariante10.py` | guardas estatísticos executáveis |
 | `poder.py` | efeito detectável; recusa calcular sem pressuposto declarado |
+| `correlacao_controles.py` | correlação entre os esquemas de controle, medida no museu |
 | `minerador_binance.py` | museu de futures e spot, via ZIP mensal |
 | `minerador_hl.py` | acúmulo prospectivo da Hyperliquid |
 | `coletor_contexto.py` | poll de OI/funding/mark, 1×/minuto |

@@ -749,3 +749,132 @@ de positivo por omissão. Está marcada aqui para poder ser riscada.
 | família | 4 células, α = 0,0125 |
 | sinais opostos | inconclusivo declarado, amplitude como resultado |
 | calendário a 37% de cobertura | 10,9 meses |
+
+### Fechamento do Adendo 2, parte 4 — escopo da tabela, e a correlação medida
+
+Ainda 2026-09-25. Ainda **zero eventos na base**.
+
+#### 8. O escopo da tabela de decisão
+
+A tabela da parte 3, como estava, se contradizia com a justificativa da
+parte 2 para manter a família em 4. A linha "não cruza → negativo,
+qualquer que seja a célula 1" faz parecer que o alfa gasto pelas células
+1, 2 e 3 não compra nada — e se não compra nada, a saída conveniente de
+reduzir a família volta pela porta dos fundos.
+
+As duas coisas convivem, mas só com o escopo escrito. Fica assim, como
+cabeçalho da tabela:
+
+> **A tabela decide o veredito sobre a tese.** As células 1, 2 e 3
+> continuam individualmente reportáveis a α = 0,0125 como **achados
+> secundários**. Nenhuma delas manda no veredito; todas podem ser
+> afirmadas. É isso que justifica o alfa que consomem — e é por isso
+> que a família continua em 4.
+
+Um veredito negativo sobre a tese **não** significa que não há mais nada
+a dizer. Significa que a tese não passou. Sem essa frase, alguém lê
+"negativo" daqui a um ano e joga fora três testes declarados que podem
+ter produzido afirmação própria.
+
+É diferença de redação, não de desenho.
+
+#### 9. A correlação entre os estimadores: medida, não mais ausente
+
+A parte 3 declarou a correlação entre a célula 4 e a célula 1 como **não
+conhecida**, e por isso deu só a probabilidade marginal — 5,3% a 10,5%
+com efeito verdadeiro de 1 pp. Ela era mensurável sem tocar em nada
+lacrado, e foi medida.
+
+**Procedência, declarada porque daqui a um ano isto pode parecer outra
+coisa:**
+
+| campo | valor |
+| --- | --- |
+| fonte | **museu Binance**, futures e spot |
+| janelas | Gate 0a e holdout — as mesmas já gastas |
+| eventos | 499 (0a fut), 492 (0a spot), 253 (holdout fut) |
+| open interest | **nenhum**; o museu não tem OI |
+| dados da coleta ao vivo | **zero eventos usados** |
+| amostra do teste | **não tocada** — ela não existe ainda |
+
+O classificador do teste é o ΔOI, que o museu não tem. A correlação foi
+medida sob três classificadores **substitutos**, todos particionando
+dentro do dia como o ΔOI fará, e nenhum deles enxergando o desfecho —
+o autoteste verifica isso permutando `ret_60m` e exigindo que a partição
+não mude.
+
+`correlacao_controles.py`, 19/19 no autoteste, bootstrap de 4000
+réplicas sobre dias, reamostrando na dimensão do desenho (N = 17):
+
+| janela | aleatório | σ | gatilho | dias qualif. | não qualif. |
+| --- | --- | --- | --- | --- | --- |
+| 0a futures | 0,709 | 0,893 | 0,818 | 32–34 | 33–35 |
+| 0a spot | 0,582 | 0,880 | 0,693 | 27–33 | 33–39 |
+| holdout futures | 0,613 | 0,639 | 0,679 | 28–33 | 39–44 |
+
+**ρ medido: 0,58 a 0,89.**
+
+#### O que a medição encontrou, e não era o número
+
+O autoteste expôs uma identidade que ninguém tinha escrito: **se todo dia
+qualificar, os dois estimadores são o mesmo número.** A média das
+diferenças diárias é igual à diferença das médias diárias quando os dois
+grupos vivem nos mesmos dias. Nesse cenário ρ = 1 exato, e a cláusula de
+sinais opostos **não pode disparar**.
+
+Ela dispara só pelos **dias não qualificados** — os que têm um regime de
+OI só, que entram no estimador não pareado e não no pareado. No museu
+esses dias são 33 a 44 contra 27 a 34 qualificados: mais da metade do
+conteúdo do estimador não pareado vem de dias que o pareado nunca vê.
+
+É isso, e não a aleatoriedade, que separa as duas células.
+
+#### O custo da cláusula, agora com faixa
+
+P(célula 4 cruza na direção da tese **e** célula 1 sai negativa):
+
+| efeito verdadeiro | marginal (parte 3) | ρ = 0,58 | ρ = 0,89 |
+| --- | --- | --- | --- |
+| 1,0 pp | 5,3% – 10,5% | 0,05% – 0,21% | ~0% |
+| 2,0 pp | 0,06% – 0,62% | 0,01% – 0,23% | ~0,01% |
+| 3,0 pp | ~0% | ~0,01% | ~0% |
+
+Varrendo o efeito verdadeiro continuamente, o **pior caso de toda a
+grade** é **0,36%**, em efeito de 1,5 pp, ρ = 0,58, janela 0a futures. A
+cláusula tem pico perto de 1,5 pp porque é ali que a célula 4 já cruza e
+a célula 1 ainda é ruidosa; abaixo disso a 4 não cruza, acima a 1 não
+erra o sinal.
+
+**A cláusula sai praticamente de graça.** A marginal da parte 3
+superestimava o custo em cerca de trinta vezes — ela ignorava que as duas
+estimativas vêm dos mesmos dias.
+
+Isto **não** afrouxa nada: a cláusula continua escrita como está, com
+critério pelo sinal e sem limiar de magnitude. O que muda é que o custo
+dela deixou de ser desconhecido e passou a ser 0,36% no pior caso.
+
+#### Limite desta estimativa, declarado
+
+ρ foi medido sob classificadores substitutos, não sob o ΔOI. Se o ΔOI
+produzir uma proporção de dias não qualificados muito diferente da do
+museu, ρ muda junto — a razão entre dias qualificados e não qualificados
+é o que governa a separação entre os dois estimadores. A faixa 0,58–0,89
+é a que os três substitutos produzem, e o extremo inferior vem do
+classificador aleatório, que é o que menos se parece com o ΔOI.
+
+**Quando os dias reais existirem, ρ é remensurável com o mesmo arquivo**,
+e essa remensuração é instrumentação, não espiar: ela depende só de quais
+dias qualificam, nunca do desfecho.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-25 |
+| eventos na base nesta data | **zero** |
+| escopo da tabela | veredito sobre a tese; células 1–3 reportáveis a 0,0125 |
+| família | 4 células, sem alteração |
+| ρ medido | **0,58 a 0,89** |
+| fonte de ρ | **museu**, não a amostra do teste |
+| custo da cláusula, pior caso | **0,36%**, em efeito de 1,5 pp |
+| instrumento | `correlacao_controles.py`, 19/19 |
