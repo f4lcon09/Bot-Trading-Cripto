@@ -118,7 +118,7 @@ CLASSIFICADORES = {
 
 
 def particionar(evs, classificador, rng):
-    """{dia: (medias do grupo 0, medias do grupo 1)}, por dia."""
+    """{dia: (media do grupo 0, media do grupo 1, n do 0, n do 1)}."""
     por_dia = defaultdict(list)
     for e in evs:
         por_dia[e["dia"]].append(e)
@@ -130,25 +130,52 @@ def particionar(evs, classificador, rng):
         a = [lista[i]["ret"] for i in range(len(lista)) if g[i] == 0]
         b = [lista[i]["ret"] for i in range(len(lista)) if g[i] == 1]
         fora[dia] = (float(np.mean(a)) if a else None,
-                     float(np.mean(b)) if b else None)
+                     float(np.mean(b)) if b else None, len(a), len(b))
     return fora
 
 
-def estimadores(medias_por_dia, dias_q, dias_u):
+def estimadores(medias_por_dia, dias_q, dias_u, empilhado=False):
     """
     (pareado, nao pareado) sobre um conjunto de dias.
 
-    pareado     - media, nos dias qualificados, de (media A - media B)
-    nao pareado - media das medias diarias de A, sobre todo dia com A,
-                  menos o mesmo para B. Dia nao qualificado entra aqui,
-                  como o Adendo 2 declara.
+    pareado - media, nos dias qualificados, de (media A - media B).
+
+    nao pareado, `empilhado=False` - o DECLARADO no Adendo 2: media das
+        medias DIARIAS de A, um peso por dia, sobre todo dia com A,
+        menos o mesmo para B. Dia nao qualificado entra aqui.
+
+    nao pareado, `empilhado=True` - o DEFEITO, presente para ser
+        exibido e nunca usado: media sobre EVENTOS empilhados, que
+        pondera cada dia pelo numero de eventos que ele teve. E a
+        primeira causa da morte da tese - eventos correlacionados
+        contados como independentes - reencarnada dentro do teste
+        escrito para nao repeti-la.
+
+    A diferenca nao e estilistica. Com agregacao diaria e 100% de dias
+    qualificados os dois estimadores sao IDENTICOS; com empilhamento
+    eles divergem mesmo assim, e rho = 1 nunca aparece. O autoteste
+    exige as duas coisas.
     """
     pares = [medias_por_dia[d][0] - medias_por_dia[d][1] for d in dias_q]
     pareado = float(np.mean(pares)) if pares else float("nan")
 
-    a = [medias_por_dia[d][0] for d in list(dias_q) + list(dias_u)
+    dias = list(dias_q) + list(dias_u)
+    if empilhado:
+        sa = sum(medias_por_dia[d][0] * medias_por_dia[d][2] for d in dias
+                 if medias_por_dia[d][0] is not None)
+        na = sum(medias_por_dia[d][2] for d in dias
+                 if medias_por_dia[d][0] is not None)
+        sb = sum(medias_por_dia[d][1] * medias_por_dia[d][3] for d in dias
+                 if medias_por_dia[d][1] is not None)
+        nb = sum(medias_por_dia[d][3] for d in dias
+                 if medias_por_dia[d][1] is not None)
+        if not na or not nb:
+            return pareado, float("nan")
+        return pareado, float(sa / na - sb / nb)
+
+    a = [medias_por_dia[d][0] for d in dias
          if medias_por_dia[d][0] is not None]
-    b = [medias_por_dia[d][1] for d in list(dias_q) + list(dias_u)
+    b = [medias_por_dia[d][1] for d in dias
          if medias_por_dia[d][1] is not None]
     if not a or not b:
         return pareado, float("nan")
@@ -156,33 +183,45 @@ def estimadores(medias_por_dia, dias_q, dias_u):
 
 
 def correlacao(evs, classificador, semente=SEMENTE, replicas=REPLICAS,
-               efeito=0.0, n_desenho=N_DESENHO):
+               efeito=0.0, n_desenho=N_DESENHO, empilhado=False,
+               fracao_nq=None):
     """
     Bootstrap sobre DIAS, reamostrando na dimensao do desenho.
 
     Cada replica sorteia `n_desenho` dias qualificados com reposicao,
-    mais dias nao qualificados na proporcao observada no museu. Os dois
-    estimadores sao calculados na MESMA replica - e por isso que a
-    correlacao medida e a correlacao por dado compartilhado.
+    mais dias nao qualificados. Os dois estimadores sao calculados na
+    MESMA replica - e por isso que a correlacao medida e a correlacao
+    por dado compartilhado.
+
+    `fracao_nq` fixa a fracao de dias NAO qualificados, em vez de usar a
+    proporcao observada no museu. E o parametro que governa tudo: a
+    clausula de sinais opostos so dispara por esses dias, entao o custo
+    dela e funcao da fracao, e rho anda junto. Sob o delta de OI real a
+    fracao pode ser bem outra que a do museu.
     """
     rng = np.random.default_rng(semente)
     medias = particionar(evs, classificador, rng)
     if efeito:
-        medias = {d: (None if v[0] is None else v[0] + efeito, v[1])
-                  for d, v in medias.items()}
+        medias = {d: (None if v[0] is None else v[0] + efeito,
+                      v[1], v[2], v[3]) for d, v in medias.items()}
 
     q = [d for d, v in medias.items() if v[0] is not None and v[1] is not None]
     u = [d for d, v in medias.items() if (v[0] is None) != (v[1] is None)]
     if len(q) < 2:
         return None
-    n_u = int(round(n_desenho * len(u) / max(1, len(q))))
+    if fracao_nq is None:
+        n_u = int(round(n_desenho * len(u) / max(1, len(q))))
+    elif fracao_nq >= 1.0:
+        return None
+    else:
+        n_u = int(round(n_desenho * fracao_nq / (1.0 - fracao_nq)))
 
     P, U = [], []
     for _ in range(replicas):
         dq = [q[i] for i in rng.integers(0, len(q), size=n_desenho)]
         du = [u[i] for i in rng.integers(0, len(u), size=n_u)] if u and n_u \
             else []
-        p, nu = estimadores(medias, dq, du)
+        p, nu = estimadores(medias, dq, du, empilhado=empilhado)
         if not (math.isnan(p) or math.isnan(nu)):
             P.append(p)
             U.append(nu)
@@ -191,6 +230,8 @@ def correlacao(evs, classificador, semente=SEMENTE, replicas=REPLICAS,
     P, U = np.array(P), np.array(U)
     return {"rho": float(np.corrcoef(P, U)[0, 1]),
             "dias_q": len(q), "dias_u": len(u), "n_eventos": len(evs),
+            "n_u_usado": n_u,
+            "fracao_nq": n_u / float(n_desenho + n_u),
             "media_pareado": float(P.mean()),
             "media_nao_pareado": float(U.mean()),
             "replicas": len(P)}
@@ -224,6 +265,70 @@ def prob_clausula(delta, sig_dif, sig_dia, rho, n=N_DESENHO, t_crit=2.8131):
     return max(0.0, conj), marginal
 
 
+FRACOES = (0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80)
+
+
+def pior_custo(sdif, sdia, rho, passo=0.02, teto=5.0):
+    """Maior P(clausula) varrendo o efeito verdadeiro, e onde ela ocorre."""
+    melhor = (0.0, 0.0)
+    d = 0.0
+    while d <= teto:
+        c, _ = prob_clausula(d, sdif, sdia, rho)
+        if c is not None and c > melhor[0]:
+            melhor = (c, d)
+        d += passo
+    return melhor
+
+
+def tabela_por_fracao(evs_por_janela, replicas=2000):
+    """
+    O custo da clausula contra a FRACAO DE DIAS NAO QUALIFICADOS.
+
+    rho nao e um numero solto: a clausula so dispara pelos dias nao
+    qualificados, entao a fracao deles e que governa, e rho anda junto.
+    Sob o delta de OI real a fracao pode ser bem diferente da do museu.
+    Esta tabela existe para que, quando os dias reais existirem, o custo
+    seja LIDO na linha correspondente - sem remodelar nada, e sem que a
+    leitura pareca ajuste feito depois.
+    """
+    print("")
+    print("=" * 70)
+    print("CUSTO DA CLAUSULA CONTRA A FRACAO DE DIAS NAO QUALIFICADOS")
+    print("(N = %d dias qualificados; pior caso sobre as tres janelas,"
+          % N_DESENHO)
+    print(" os tres classificadores e todo efeito verdadeiro ate 5 pp)")
+    print("")
+    print("%9s %8s %16s %12s %12s"
+          % ("fracao nq", "dias nq", "rho medido", "pior custo", "no efeito"))
+    print("-" * 62)
+    linhas = []
+    for f in FRACOES:
+        rhos = []
+        n_u = None
+        for rot, evs in evs_por_janela.items():
+            for c in CLASSIFICADORES:
+                r = correlacao(evs, c, replicas=replicas, fracao_nq=f)
+                if r:
+                    rhos.append(r["rho"])
+                    n_u = r["n_u_usado"]
+        if not rhos:
+            continue
+        lo, hi = min(rhos), max(rhos)
+        pior, onde = 0.0, 0.0
+        for _, _, _, _, sdif, sdia in JANELAS:
+            c, d = pior_custo(sdif, sdia, lo)
+            if c > pior:
+                pior, onde = c, d
+        linhas.append((f, n_u, lo, hi, pior, onde))
+        print("%8.0f%% %8d %7.3f a %.3f %11.3f%% %10.2f pp"
+              % (100 * f, n_u, lo, hi, 100 * pior, onde))
+    print("-" * 62)
+    print("Leitura: o custo e o teto sob o rho MENOS favoravel medido")
+    print("naquela fracao. Fracao maior -> mais dia que so o estimador")
+    print("nao pareado ve -> menos correlacao -> clausula mais cara.")
+    return linhas
+
+
 def main():
     print("CORRELACAO ENTRE OS ESTIMADORES PAREADO E NAO PAREADO")
     print("fonte: MUSEU (Binance futures/spot). Nao e a amostra do teste.")
@@ -232,6 +337,7 @@ def main():
           % (N_DESENHO, REPLICAS))
 
     rhos = []
+    guardados = {}
     for rot, chave, ini, fim, sdif, sdia in JANELAS:
         print("")
         print("=" * 70)
@@ -244,6 +350,7 @@ def main():
         if not evs:
             print("  sem eventos nesta janela")
             continue
+        guardados[rot] = evs
         print("  %-11s %7s %7s %7s   %s"
               % ("classific.", "rho", "dias_q", "dias_u", "eventos"))
         for c in CLASSIFICADORES:
@@ -264,6 +371,8 @@ def main():
     print("")
     print("=" * 70)
     print("FAIXA MEDIDA DE rho: %.3f a %.3f" % (lo, hi))
+
+    tabela_por_fracao(guardados)
 
     print("")
     print("CUSTO DA CLAUSULA DE SINAIS OPOSTOS")
@@ -380,6 +489,30 @@ def autoteste():
     r.append(_ok(misto["rho"] < 1.0 - 1e-6,
                  "dia nao qualificado e o que separa os dois estimadores",
                  "rho %.3f" % misto["rho"]))
+
+    print(chr(10) + "4c. A CELULA 1 AGREGA POR DIA, E NAO EMPILHA EVENTOS")
+    # A identidade do bloco 4 SO vale se o estimador nao pareado agregar
+    # por dia. Se ele empilhasse eventos, ponderaria cada dia pelo numero
+    # de eventos que teve - eventos correlacionados contados como
+    # independentes, a primeira causa da morte da tese. Estes dois casos
+    # separam as duas definicoes de forma executavel, em vez de confiar
+    # na leitura do codigo.
+    emp_q = correlacao(_sintetico(sempre_qualifica=True), "aleatorio",
+                       replicas=1200, empilhado=True)
+    r.append(_ok(emp_q["rho"] < 1.0 - 1e-6,
+                 "empilhado quebra a identidade mesmo com todo dia qualif.",
+                 "rho %.4f" % emp_q["rho"]))
+    r.append(_ok(abs(tudo_q["rho"] - 1.0) < 1e-9,
+                 "agregado por dia a preserva", "rho %.6f" % tudo_q["rho"]))
+    # e o default do modulo e o agregado por dia
+    med = particionar(_sintetico(), "aleatorio", np.random.default_rng(3))
+    dq = [d for d, v in med.items() if v[0] is not None and v[1] is not None]
+    r.append(_ok(estimadores(med, dq, [])[1]
+                 != estimadores(med, dq, [], empilhado=True)[1],
+                 "as duas definicoes dao numeros diferentes"))
+    r.append(_ok(abs(estimadores(med, dq, [])[1]
+                     - estimadores(med, dq, [])[0]) < 1e-9,
+                 "o default e o agregado por dia (identidade vale)"))
 
     print(chr(10) + "4b. rho NAO DEPENDE DO TAMANHO DO EFEITO")
     r0 = correlacao(_sintetico(), "aleatorio", replicas=2500)["rho"]

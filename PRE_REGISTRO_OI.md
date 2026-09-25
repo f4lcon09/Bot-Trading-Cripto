@@ -878,3 +878,113 @@ dias qualificam, nunca do desfecho.
 | fonte de ρ | **museu**, não a amostra do teste |
 | custo da cláusula, pior caso | **0,36%**, em efeito de 1,5 pp |
 | instrumento | `correlacao_controles.py`, 19/19 |
+
+### Fechamento do Adendo 2, parte 5 — o que a célula 4 testa de verdade
+
+Ainda 2026-09-25. Ainda **zero eventos na base**.
+
+#### 10. A descrição da célula 4 estava prometendo mais do que entrega
+
+A identidade encontrada pelo autoteste tem uma consequência que não foi
+tirada na parte 4. Se as células 1 e 4 só divergem pelos dias **não
+qualificados**, então elas não são dois controles: são **o mesmo
+contraste sobre dois conjuntos de dias**.
+
+A emenda da invariante 10 fala em "mais de uma estratégia de controle
+defensável", e isso significa formas genuinamente diferentes de construir
+o contrafactual. Aqui, no limite em que todo dia qualifica, as duas dão o
+**mesmo número**. Logo:
+
+> **A célula 4 não testa robustez à escolha do controle. Testa robustez
+> à restrição de amostra** — o mesmo contraste, calculado sobre os dias
+> em que os dois regimes coexistem, contra o calculado sobre todos os
+> dias.
+
+Onde a parte 2 diz que a célula 4 "existe para testar a robustez da
+célula 1 ao esquema de controle — que é a exigência da invariante 10
+sobre amplitude entre controles defensáveis", **essa frase está corrigida
+por esta**. O texto original fica onde está.
+
+**A consequência desagradável, escrita por extenso:** esta família **não
+satisfaz** a exigência da invariante 10 sobre amplitude entre controles.
+Ela tem um contraste sob duas restrições de amostra, o que é menos.
+Um controle genuinamente diferente — casamento por σ, por exemplo, que
+foi justamente o que desmontou na autópsia — seria outra célula, com
+outro custo de alfa, e **não está sendo acrescentada agora**. Fica
+registrado que a exigência está parcialmente atendida, e não que está
+atendida.
+
+#### 11. Células 1 e 4 agregam por dia — verificado no código
+
+A identidade só vale se a célula 1 também agregar por dia. Se ela
+empilhasse eventos, ponderaria cada dia pelo número de eventos que teve,
+as duas não coincidiriam nem com 100% de qualificação, e ρ = 1 nunca
+apareceria.
+
+**Conferido no código, não na intenção.** Em
+`correlacao_controles.estimadores`, o estimador não pareado é a média das
+médias **diárias**, um peso por dia. A definição agora é executável em
+vez de documental: a função aceita `empilhado=True`, e o autoteste exige
+que as duas definições se separem —
+
+| definição | ρ com 100% de dias qualificados |
+| --- | --- |
+| agregado por dia (o declarado) | **1,000000** exato |
+| empilhado por evento (o defeito) | 0,718 |
+
+Se alguém trocar a definição, a identidade quebra e o autoteste reprova.
+
+**O risco não está eliminado, está um passo ao lado.** O `analise.py`
+empilha eventos — `rets.mean()` sobre todos os eventos de todos os
+símbolos e dias. Isso é deliberado lá: aquele arquivo reaplica o
+procedimento da tese sem alterar um parâmetro, e foi exatamente essa
+contagem que produziu o design effect de 3,51 a 7,45.
+
+**Não existe ainda código que implemente o teste de OI.** Quando ele for
+escrito, reutilizar `medir()` do `analise.py` reintroduz a primeira causa
+da morte da tese dentro do teste escrito para não repeti-la. Fica
+declarado aqui: **o teste de OI agrega por dia, um peso por dia, nas
+quatro células.**
+
+#### 12. O custo da cláusula, parametrizado pelo que o governa
+
+Como a cláusula só dispara pelos dias não qualificados, o custo dela é
+função da **fração de dias não qualificados**, não de ρ como número
+solto. No museu essa fração ficou em torno de 55% sob os substitutos; sob
+o ΔOI real ela pode ser bem outra, e ρ anda junto.
+
+Registrado como limite parametrizado, para ser **lido na linha** quando
+os dias reais existirem — sem remodelar nada, e sem que a leitura pareça
+ajuste feito depois:
+
+| fração não qualif. | dias nq (N=17) | ρ medido | pior custo | no efeito |
+| --- | --- | --- | --- | --- |
+| 20% | 4 | 0,875 – 0,968 | 0,014% | 2,28 pp |
+| 30% | 7 | 0,808 – 0,944 | 0,045% | 2,00 pp |
+| 40% | 11 | 0,723 – 0,917 | 0,123% | 1,76 pp |
+| 50% | 17 | 0,673 – 0,885 | 0,191% | 1,66 pp |
+| **55% (museu)** | — | 0,58 – 0,89 | **0,36%** | 1,52 pp |
+| 60% | 25 | 0,567 – 0,856 | 0,389% | 1,50 pp |
+| 70% | 40 | 0,476 – 0,788 | 0,618% | 1,40 pp |
+| 80% | 68 | 0,435 – 0,715 | 0,738% | 1,36 pp |
+
+O custo é o teto sob o ρ **menos favorável** medido naquela fração,
+varrendo todo efeito verdadeiro até 5 pp, nas três janelas. Fração maior
+→ mais dia que só o estimador não pareado enxerga → menos correlação →
+cláusula mais cara. **Mesmo no extremo de 80%, o custo é 0,74%.**
+
+A cláusula sai barata em toda a faixa plausível. Isso é registro de
+custo, não permissão para afrouxá-la.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-25 |
+| eventos na base nesta data | **zero** |
+| o que a célula 4 testa | **restrição de amostra**, não escolha de controle |
+| invariante 10, amplitude entre controles | **parcialmente atendida** |
+| agregação das quatro células | **por dia, um peso por dia** |
+| verificação | no código, com autoteste que separa as definições |
+| custo da cláusula | 0,014% a 0,738%, conforme a fração não qualificada |
+| instrumento | `correlacao_controles.py`, 23/23 |
