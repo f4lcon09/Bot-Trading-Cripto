@@ -132,6 +132,70 @@ def aviso(msg):
         pass
 
 
+# --------------------------------------------------------------------
+# SUSPENSAO DA MAQUINA
+#
+# Medido em 27/09/2026 nesta maquina: suspensao automatica por
+# ociosidade em 3600 s na tomada e 600 s na bateria, S3 disponivel,
+# hibernacao desabilitada. Um processo que so faz requisicao de rede
+# NAO reseta o contador de ociosidade do sistema - so entrada do
+# usuario ou um pedido explicito resetam.
+#
+# Consequencia medida: 09:00-10:59 UTC ficou em cobertura ZERO nos sete
+# dias de coleta, e o total agregado ficou em 48%. Nao e perda de
+# poder, e ponto cego estrutural: mais dias nao corrigem.
+#
+# ES_SYSTEM_REQUIRED | ES_CONTINUOUS pede que o sistema nao suspenda
+# por ociosidade enquanto este processo estiver de pe. Nao inclui
+# ES_DISPLAY_REQUIRED de proposito - a tela pode apagar. E NAO impede
+# suspensao manual: fechar a tampa ou mandar suspender continua
+# funcionando, como deve.
+#
+# INVARIANTE 11: o pedido pode ser recusado, e um pedido recusado em
+# silencio e indistinguivel de um atendido. Por isso o resultado vai
+# para o poller.log na subida. Se o furo continuar aparecendo, o log
+# distingue "nunca pedimos" de "pedimos e suspendeu de todo jeito".
+# --------------------------------------------------------------------
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+
+
+def impedir_suspensao():
+    """
+    Pede ao Windows para nao suspender por ociosidade. (ok, detalhe).
+
+    Por thread: tem de ser chamada na thread que fica viva, que e a que
+    roda o laco de coleta.
+    """
+    if os.name != "nt":
+        return False, f"sistema {os.name!r}, nao Windows"
+    try:
+        import ctypes
+        fn = ctypes.windll.kernel32.SetThreadExecutionState
+        # Sem restype explicito, ctypes devolve c_int com SINAL e o
+        # estado anterior 0x80000000 imprime como 0x-80000000. O tipo
+        # verdadeiro e EXECUTION_STATE = DWORD.
+        fn.restype = ctypes.c_uint32
+        fn.argtypes = [ctypes.c_uint32]
+        anterior = fn(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    except (AttributeError, OSError) as e:
+        return False, f"{type(e).__name__}: {e}"
+    if anterior == 0:
+        return False, "SetThreadExecutionState devolveu 0 (pedido recusado)"
+    return True, f"estado anterior 0x{anterior:08X}"
+
+
+def liberar_suspensao():
+    """Devolve a maquina ao comportamento normal de ociosidade."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+    except (AttributeError, OSError):
+        pass
+
+
 def obter_trava():
     """
     True se esta instancia pegou a trava; False se ja ha outra de pe.
@@ -472,6 +536,9 @@ def main():
         pass
 
     aviso(f"==== subida em {humano(agora_ms())} ====")
+    ok_sono, detalhe_sono = impedir_suspensao()
+    aviso(f"suspensao por ociosidade: "
+          f"{'BLOQUEADA' if ok_sono else 'NAO BLOQUEADA'} ({detalhe_sono})")
     print(f"COLETOR DE CONTEXTO  {len(MAJORS)} majors  1 poll/minuto")
     print(f"horarios: seu fuso ({offset_local()}) primeiro, UTC entre "
           f"parenteses. O CSV grava UTC puro.")
@@ -483,6 +550,8 @@ def main():
         col.rodar()
     except KeyboardInterrupt:
         pass
+    finally:
+        liberar_suspensao()
     print("\nencerrado.", flush=True)
     return 0
 

@@ -374,7 +374,7 @@ def teste_agregacao_obrigatoria():
     documento nao segura; o `raise` segura. Este bloco garante que o
     `raise` continua la depois de qualquer refatoracao.
     """
-    print(chr(10) + "9. AGREGACAO OBRIGATORIA EM medir()")
+    print(chr(10) + "9. AGREGACAO OBRIGATORIA EM medir() E EM julgar()")
     import inspect
 
     import analise
@@ -404,6 +404,55 @@ def teste_agregacao_obrigatoria():
     n = fonte.count('agregacao="evento"')
     checar("as chamadas de analise.py declaram 'evento' explicitamente",
            n >= 1, "%d chamada(s) explicita(s)" % n)
+
+    # ---------------------------------------------------------------
+    # A MESMA EXIGENCIA, NO JULGADOR DE GATE
+    #
+    # Se `medir()` exige a unidade, o julgador tem de exigir tambem: a
+    # mesma janela vale +1,712% empilhada e +0,501% por dia, um fator de
+    # 3,4. Comparar +0,501% (dia) contra o limiar de +0,7% (evento) e
+    # devolver "reprovado" seria o blood_toll_pct promovido a criterio
+    # de aceitacao.
+    # ---------------------------------------------------------------
+    for chave, g in analise.GATES.items():
+        checar("gate %r declara a unidade dos seus limiares" % chave,
+               g.get("agregacao") in analise.AGREGACOES,
+               "agregacao=%r" % g.get("agregacao"))
+
+    falso = {"alpha": 0.005, "win_rate": 0.657, "positivos": 17,
+             "n": 67, "n_eventos": 499, "agregacao": "dia"}
+    gate_evento = analise.GATES["0a"]
+    try:
+        analise.julgar(gate_evento, falso, analise.FAMILIA_TESE)
+        checar("julgar() recusa medida por dia contra limiar por evento",
+               False, "julgou unidades diferentes sem reclamar")
+    except analise.UnidadeIncompativel:
+        checar("julgar() recusa medida por dia contra limiar por evento",
+               True, "UnidadeIncompativel")
+
+    igual = dict(falso, agregacao="evento")
+    try:
+        v, _ = analise.julgar(gate_evento, igual, analise.FAMILIA_TESE)
+        checar("julgar() aceita quando as unidades batem", True,
+               "veredito %s" % v)
+    except analise.UnidadeIncompativel:
+        checar("julgar() aceita quando as unidades batem", False,
+               "recusou unidades iguais")
+
+    sem_unidade = dict(falso)
+    del sem_unidade["agregacao"]
+    try:
+        analise.julgar(gate_evento, sem_unidade, analise.FAMILIA_TESE)
+        checar("julgar() recusa medida sem unidade declarada", False)
+    except analise.UnidadeIncompativel:
+        checar("julgar() recusa medida sem unidade declarada", True)
+
+    try:
+        analise.julgar({k: v for k, v in gate_evento.items()
+                        if k != "agregacao"}, igual, analise.FAMILIA_TESE)
+        checar("julgar() recusa gate sem unidade declarada", False)
+    except analise.UnidadeIncompativel:
+        checar("julgar() recusa gate sem unidade declarada", True)
 
 
 def main():

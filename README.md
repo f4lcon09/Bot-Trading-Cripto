@@ -150,6 +150,12 @@ E `medir()` **não tem agregação padrão**. Quem chama escreve
 ninguém herda a escolha errada por omissão. O padrão antigo era "evento",
 correto para reaplicar a tese e errado para qualquer análise nova.
 
+E **todo limiar de gate declara a unidade em que foi calibrado**.
+`julgar()` levanta `UnidadeIncompativel` em vez de comparar
+`+0,501% (dia)` contra um limiar de `+0,7% (evento)` — a mesma janela
+vale as duas coisas, com fator 3,4 entre elas. O julgador não
+converte: o fator é propriedade da amostra, como o design effect.
+
 ### 11 — ausência de medição nunca é medição de zero
 
 Um `open_interest` igual a `0.0` num símbolo deslistado e um igual a `0.0`

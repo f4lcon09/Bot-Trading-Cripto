@@ -75,6 +75,11 @@ GATES = {
         "wr_reprova": 0.58,
         "simbolos_min": None,
         "zona_intermediaria": None,   # a especificacao nao define
+        # UNIDADE DOS LIMIARES ACIMA. +0,7% e 65% foram calibrados na
+        # tese, que empilhava eventos. Comparar essa faixa com uma
+        # medida agregada por dia erra por um fator de 3,4 e nao
+        # levanta excecao sozinho - por isso a unidade vem escrita.
+        "agregacao": "evento",
     },
     "0": {
         "nome": "Gate 0 - holdout em futures",
@@ -89,6 +94,8 @@ GATES = {
         "wr_reprova": 0.55,
         "simbolos_min": 12,
         "zona_intermediaria": "reprova",
+        # idem: +0,5% e 60% sao numeros de unidade empilhada.
+        "agregacao": "evento",
     },
 }
 
@@ -351,21 +358,62 @@ def imprimir_agregado(res):
           f"{res['com_eventos']}")
 
 
+class UnidadeIncompativel(Exception):
+    """
+    Limiar e medida em unidades de agregacao diferentes.
+
+    Os limiares dos gates (+0,7% e 65% no 0a, +0,5% e 60% no 0) foram
+    calibrados na tese, que empilhava eventos. A mesma janela medida por
+    dia da +0,501% em vez de +1,712%: um fator de 3,4.
+
+    Comparar `+0,501% (dia)` contra `+0,7% (evento)` e devolver
+    "reprovado" seria o `blood_toll_pct` promovido a criterio de
+    aceitacao - valor medido numa situacao, aplicado em outra, por nao
+    carregar consigo de onde veio. Nao quebra nada em execucao, e
+    enterra ou absolve uma estrategia dentro de uma unidade que nao e a
+    dela.
+
+    Quem quiser julgar por dia declara limiares por dia. O julgador nao
+    converte, porque o fator de 3,4 e uma propriedade DESTA amostra e
+    nao uma constante de bolso - exatamente como o design effect.
+    """
+
+
 def julgar(gate, res, familia=None):
     """
     Devolve (veredito, linhas) sem mover nenhum limiar.
 
     Invariante 10, aplicada: nao ha julgamento sem familia de busca
-    registrada e selada. `exigir_familia` levanta excecao — isto e
+    registrada e selada, e nao ha comparacao entre limiar e medida de
+    unidades diferentes. `exigir_familia` e `UnidadeIncompativel` sao
     asserção, nao comentario.
     """
     exigir_familia(familia if familia is not None else FAMILIA_TESE)
+
+    esperada = gate.get("agregacao")
+    medida = res.get("agregacao")
+    if esperada is None:
+        raise UnidadeIncompativel(
+            f"o gate {gate['nome']!r} nao declara 'agregacao'. "
+            f"Limiar sem unidade nao e limiar.")
+    if medida is None:
+        raise UnidadeIncompativel(
+            "a medida nao declara 'agregacao'. Veja medir().")
+    if esperada != medida:
+        raise UnidadeIncompativel(
+            f"limiares calibrados em {esperada!r} contra medida em "
+            f"{medida!r}. A mesma janela vale +1,712% empilhada e "
+            f"+0,501% por dia - fator 3,4. Declare limiares na unidade "
+            f"da medida em vez de comparar as duas.")
+
     linhas = []
     c_alpha_p = res["alpha"] > gate["alpha_passa"]
     c_wr_p = res["win_rate"] > gate["wr_passa"]
     c_alpha_r = res["alpha"] < gate["alpha_reprova"]
     c_wr_r = res["win_rate"] < gate["wr_reprova"]
 
+    linhas.append(f"  unidade dos limiares     {esperada}  "
+                  f"(n = {res['n']}; eventos = {res['n_eventos']})")
     linhas.append(f"  alpha > {gate['alpha_passa']:+.1%}            "
                   f"{res['alpha']:+.3%}   {'ok' if c_alpha_p else 'nao'}")
     linhas.append(f"  win rate > {gate['wr_passa']:.0%}           "
@@ -500,6 +548,31 @@ def main(argv):
         print(ln)
     print()
     print(f"  VEREDITO: {veredito}")
+
+    # O QUE O VEREDITO RESPONDEU, impresso AQUI e nao trinta paragrafos
+    # acima numa secao de autopsia. Sem esta nota, alguem le
+    # "Gate 0a APROVADO" em 2027 e entende "existe edge em futures".
+    if veredito == "APROVADO" and res["agregacao"] == "evento":
+        alt = medir(gate["superficie"], aprovados, inicio, fim,
+                    chave_gate + "_dia", agregacao="dia")
+        print()
+        print("  O QUE ESTE VEREDITO RESPONDEU")
+        print("  Pergunta respondida: o procedimento da tese REPLICA nesta")
+        print("  superficie? Nao: existe edge nesta superficie?")
+        print(f"  Limiares e medida em unidade de EVENTO, como a tese.")
+        if alt:
+            print(f"  A MESMA janela agregada por DIA: alpha "
+                  f"{alt['alpha']:+.3%}, win rate {alt['win_rate']:.1%}, "
+                  f"n = {alt['n']} dias.")
+            faixa = ("abaixo do limiar de reprovacao"
+                     if alt["alpha"] < gate["alpha_reprova"] else
+                     "na zona intermediaria" if alt["alpha"]
+                     < gate["alpha_passa"] else "acima do limiar de passagem")
+            print(f"  Sob contagem por dia a estimativa pontual cai "
+                  f"{faixa}.")
+            print("  Os limiares por dia NAO existem, entao isto nao e um")
+            print("  veredito - e o aviso de que o aprovado acima vale para")
+            print("  a pergunta de replicacao, e so para ela.")
 
     if veredito == "REPROVADO" and chave_gate == "0a":
         print("  O edge era artefato de spot. O bot operaria perpetuo, e")

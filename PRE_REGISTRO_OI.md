@@ -1089,3 +1089,140 @@ que criou a 79ª célula da tese.
 | alpha in-sample por dia | **+0,501%** (era +1,712% empilhado) |
 | alpha holdout por dia | **+0,123%** (era +0,303% empilhado) |
 | dívida da invariante 10 | declarada, não resolvida |
+
+### Fechamento do Adendo 2, parte 7 — o que os vereditos responderam
+
+Escrito em 2026-09-27. **Zero eventos na base** — a coleta de OI segue
+acumulando contexto, e nenhum gatilho da tese de OI ocorreu ainda.
+
+#### 15. O Gate 0a respondeu a pergunta de replicação, não a de edge
+
+Os critérios do 0a: passa acima de **+0,7% de alpha e 65% de WR**,
+reprova abaixo de +0,3%. Foi aprovado com **+1,712% e 72,9%**.
+
+Agregado por dia, a mesma janela dá **+0,501% e 65,7%**, com n = 67 dias.
+O alpha cai na **zona intermediária** — nem passa nem reprova
+explicitamente — e o win rate encosta no piso com 0,7 ponto de folga.
+
+E o 0a é o gate cuja reprovação encerra o projeto: *"Reprovando, o
+projeto termina."*
+
+**Isto não é retratação.** O 0a existe para responder "o procedimento da
+tese replica em futures?", e responder isso exige rodar o mesmo
+procedimento — empilhado e tudo. Os limiares de +0,7% e 65% também foram
+calibrados em unidade empilhada, então o gate é internamente consistente.
+
+Mas a frase precisa estar **ao lado do veredito**, e agora está — o
+`analise.py` a imprime junto, não numa seção de autópsia trinta
+parágrafos acima:
+
+> **O gate respondeu "o pipeline reproduz a tese em futures", não "existe
+> edge em futures".** Sob contagem por dia a estimativa pontual cai na
+> faixa que o próprio documento trata como não-passagem. Limiares por dia
+> não existem, então isso não é um veredito — é o aviso de que o
+> APROVADO vale para a pergunta de replicação, e só para ela.
+
+#### 16. Nenhum limiar declarava sua unidade — consertado
+
+Se +0,7% e 65% são números em unidade empilhada, e a diferença entre as
+unidades é **3,4×**, então todo limiar de aceitação do documento carrega
+uma unidade implícita que ninguém escreveu. O Gate 0 tem +0,5% e 60%. O
+Gate 0b tem 70% de sobreposição.
+
+É o `blood_toll_pct` promovido a critério de aceitação: valor medido numa
+situação, aplicado em outra, por não carregar consigo de onde veio. E
+como critério ele é pior que como custo — não enterra uma estratégia,
+**absolve ou condena uma** sem levantar exceção.
+
+O conserto é o do `medir()`, aplicado ao julgador:
+
+| antes | depois |
+| --- | --- |
+| `GATES` traz só os números | cada gate declara `"agregacao"` |
+| `julgar()` compara qualquer coisa | `UnidadeIncompativel` se as unidades diferirem |
+| a unidade não aparecia na saída | primeira linha do veredito é a unidade |
+
+`julgar()` **não converte**. O fator de 3,4 é propriedade desta amostra,
+não constante de bolso — exatamente como o design effect, que variou de
+3,51 a 7,45. Quem quiser julgar por dia declara limiares por dia.
+
+**Gate 1b, bloco 9, estendido:** verifica que cada gate declara a
+unidade, que `julgar()` recusa medida por dia contra limiar por evento,
+que recusa medida sem unidade, que recusa gate sem unidade, e que aceita
+quando as duas batem.
+
+#### 17. Os dois win rates, lado a lado
+
+| número | o que é |
+| --- | --- |
+| **51,7%** | o WR que a V1 reportou, e que este documento cita como o exemplo do que não fazer |
+| **52,8%** | o WR do holdout da V2, agregado por dia |
+
+Estão a **1,1 ponto** um do outro. Não é coincidência com significado: é
+a mesma coisa medida duas vezes. **O holdout é ruído**, e agora está dito
+no número que o próprio documento escolheu como símbolo de amostra
+pequena lida com otimismo.
+
+A diferença entre os dois é só quem mediu: um é a V1 se avaliando, o
+outro é a V2 medindo a V1 corretamente. É o fecho que a autópsia podia
+ter.
+
+#### 18. A cobertura, e uma causa que ainda não estava consertada
+
+Medido em 2026-09-27, sete dias de coleta:
+
+| campo | valor |
+| --- | --- |
+| cobertura agregada | **48%** (4859 de 10080 minutos) |
+| **09:00–10:59 UTC** | **zero absoluto nos sete dias** |
+| 05:00–08:59 UTC | 12% a 27% |
+| suspensão automática, na tomada | 3600 s |
+| suspensão automática, na bateria | 600 s |
+| hibernação | desabilitada; só S3 disponível |
+| modo de logon da tarefa | **Interativo apenas** |
+| último resultado da tarefa | `0x800710E0` |
+
+Duas notas de leitura, porque as duas são armadilhas:
+
+1. **`0x800710E0` não é falha.** É "o operador ou administrador recusou o
+   pedido": a repetição de 10 minutos disparando e sendo recusada porque
+   já existe instância, que é o `MultipleInstancesPolicy=IgnoreNew`
+   funcionando. Lido como código de erro, mandaria alguém depurar o que
+   está correto.
+2. **A melhora de cobertura dos últimos dias não teve causa de código.**
+   Até 2026-09-27 o `SetThreadExecutionState` **não estava
+   implementado**, e o `powercfg` seguia intocado. Atribuir a melhora a
+   um conserto inexistente seria construir causalidade falsa sobre a
+   única série que este projeto não pode recuperar.
+
+**Agora está implementado.** `coletor_contexto.impedir_suspensao()` pede
+`ES_CONTINUOUS | ES_SYSTEM_REQUIRED` na subida, sem
+`ES_DISPLAY_REQUIRED` — a tela pode apagar, e suspender manualmente
+continua funcionando. Um processo que só faz requisição de rede não
+reseta o contador de ociosidade do sistema; o pedido explícito reseta.
+
+**Invariante 11 aplicada:** o pedido pode ser recusado, e recusa em
+silêncio é indistinguível de sucesso. O resultado vai para o
+`poller.log` na subida — `suspensao por ociosidade: BLOQUEADA` ou `NAO
+BLOQUEADA`, com o motivo. Se o furo reaparecer, o log distingue "nunca
+pedimos" de "pedimos e suspendeu de todo jeito".
+
+O que isto **não** conserta: a tarefa em `Interativo apenas` não roda sem
+sessão logada, então desligamento e logoff continuam produzindo furo.
+Isso é configuração de sistema e fica como decisão em aberto, não como
+conserto silencioso.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-27 |
+| eventos na base nesta data | **zero** |
+| nota do Gate 0a | impressa junto ao veredito |
+| limiares | todos declaram `agregacao` |
+| `julgar()` | `UnidadeIncompativel`; não converte |
+| guarda | Gate 1b, bloco 9, dez verificações |
+| WR V1 / WR V2 por dia | 51,7% / 52,8% |
+| cobertura agregada | 48%; 09:00–10:59 UTC em zero |
+| suspensão | bloqueada por código, com resultado logado |
+| tarefa em `Interativo apenas` | **não consertado**, decisão em aberto |
