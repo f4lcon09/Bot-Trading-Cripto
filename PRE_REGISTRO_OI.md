@@ -1632,3 +1632,77 @@ replicação ninguém checou.
 | isolamento do bloco novo | verificado pelo bloco 10 |
 | `backup.py` | **37/37** |
 | replicação | **ainda não atestada** |
+
+### Fechamento do Adendo 2, parte 11 — destino final e replicação atestada
+
+Escrito em 2026-09-28. **Zero eventos na base.**
+
+#### 28. O destino mudou por modo de falha, não por comodidade
+
+O backup passou de `%OneDrive%` para **`G:\Meu Drive\SniperV2_backup`**,
+a letra do Google Drive em modo streaming.
+
+O argumento decisivo foi um modo de falha que **o atestado não pega**:
+
+> Com a quota estourada, o cliente para de sincronizar mas a pasta em
+> `C:` continua existindo. O `backup.py` copia, conta 14 arquivos, grava
+> `ok: true`, e nada sai do disco. Entre duas renovações do atestado
+> haveria até **30 dias de cópia imaginária**.
+
+O `G:` não tem esse estado: ou a letra existe e replica, ou some e o
+backup quebra na hora. **O destino que quebra alto é o que satisfaz a
+invariante 11 por construção**, sem precisar de guarda.
+
+Duas consequências de desenho:
+
+1. O critério de volume passou a ser perguntado ao **sistema de
+   arquivos** (`st_dev`), não deduzido da string do caminho. Uma pasta
+   batizada "Google Drive" em `C:` tem letra `C:` e não replica nada.
+   Sem poder perguntar, a resposta conservadora é "mesmo volume", que
+   **exige** justificativa em vez de dispensá-la.
+2. O mecanismo de raiz sincronizada (`%OneDrive%`) **fica no código**.
+   Ele resolve o caso geral de pasta sincronizada dentro do mesmo
+   volume, e vale para qualquer provedor assim. **Saiu a configuração,
+   não a lição.**
+
+**Gate 1b, bloco 9c** prova o que dá a vantagem: destino ausente
+**reprova em vez de criar a pasta** — `conferir_destino` recusa e não
+cria, `copiar()` recusa e não cria, volume inteiro ausente recusa. Sem
+esse teste, um `os.makedirs` numa refatoração traria o silêncio de volta.
+
+#### 29. A ordem das operações preservou a garantia
+
+A troca seguiu ordem declarada antes de começar: apontar, copiar,
+conferir na web, atestar, e **só então** remover a cópia antiga.
+
+Entre o primeiro e o quarto passo, a única cópia verificada era a do
+OneDrive. Removê-la antes deixaria os sete dias existindo só no disco
+desta máquina, por alguns minutos. **É o mesmo raciocínio de não fundir
+células antes de declarar a família: a ordem das operações é que preserva
+a garantia.**
+
+#### Estado nesta data
+
+| item | estado |
+| --- | --- |
+| destino | `G:\Meu Drive\SniperV2_backup\dados_execucao` |
+| cópia | 14 arquivos, 12,5 MB |
+| justificativa gravada | `volume distinto (G:), confirmado por st_dev` |
+| **replicação atestada** | **sim** — 2026-09-28T15:03:20Z, por `User` |
+| validade do atestado | 29 dias restantes |
+| porteiro | **aprova**, saída 0 |
+| cópia antiga no OneDrive | **mantida**, remoção não executada |
+
+#### O que ainda não está automático
+
+O poller em execução (PID 17768, subida às 13:22Z) **não tem o gancho de
+backup**: ele subiu antes do código existir, e o `.bat` só passou a
+definir `SNIPER_BACKUP_DIR` depois. A cópia de hoje foi **manual**.
+
+O gancho e a variável entram na próxima subida do poller — que acontece
+quando a máquina for ligada de novo. Fica registrado para que ninguém
+leia "backup automático" como algo que já rodou alguma vez: **até esta
+data, toda cópia foi disparada à mão.**
+
+O bloqueio de suspensão, esse sim, está ativo no processo de pé desde
+13:22Z.

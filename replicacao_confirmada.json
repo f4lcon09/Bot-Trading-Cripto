@@ -1,0 +1,10 @@
+{
+  "destino": "G:\\Meu Drive\\SniperV2_backup\\dados_execucao",
+  "quando_utc": "2026-09-28T15:03:20+00:00",
+  "vence_em_utc": "2026-10-28T15:03:20+00:00",
+  "validade_dias": 30,
+  "quem": "User",
+  "natureza": "AFIRMACAO HUMANA, NAO MEDICAO",
+  "por_que_vence": "a sincronizacao pode ser pausada, deslogada, estourar quota ou perder a vinculacao da conta DEPOIS desta confirmacao. Sem prazo, uma afirmacao pontual viraria garantia continua.",
+  "o_que_foi_conferido": "abri o servico de sincronizacao na web, entrei na pasta de destino e vi os arquivos de contexto la - fora deste disco"
+}
