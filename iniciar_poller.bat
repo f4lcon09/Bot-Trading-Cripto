@@ -43,7 +43,11 @@ REM de C: continuaria existindo como pasta comum, a copia "funcionaria",
 REM o status diria ok, e nada replicaria. O destino que quebra alto e o
 REM que satisfaz a invariante 11 por construcao.
 REM ====================================================================
-set "SNIPER_BACKUP_DIR=G:\Meu Drive\SniperV2_backup"
+REM NAO define SNIPER_BACKUP_DIR aqui. O destino mora em
+REM destino_backup.txt, lido tanto pelo poller quanto pela execucao
+REM manual. Definir nos dois lugares foi o defeito de 28/09/2026:
+REM o poller enxergava e um shell limpo nao, entao o procedimento
+REM documentado no README falhava para qualquer um que o seguisse.
 
 "C:\Users\User\AppData\Local\Programs\Python\Python314\python.exe" -u "C:\SniperV2\coletor_contexto.py"
 

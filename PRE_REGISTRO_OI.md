@@ -1764,3 +1764,143 @@ peça desta cadeia que não depende de disco nem de provedor.
 | manifesto | `instantaneo_2026-09-28.json`, 14 arquivos, versionado |
 | comparação hoje | **nenhuma divergência** |
 | porteiro | aprova, saída 0 |
+
+### Fechamento do Adendo 2, parte 13 — uma retratação e quatro defeitos
+
+Escrito em 2026-09-28. **Zero eventos na base.**
+
+#### 32. RETRATADO: os arquivos não sumiram do destino
+
+Foi afirmado nesta data, com tabela de horários, que os 14 arquivos
+copiados para o `G:` às 14:58Z **desapareceram** e que o atestado
+testemunhava conteúdo inexistente. **Isso está errado.**
+
+A evidência usada foi `copiados=14, inalterados=0` numa cópia posterior,
+lida como "o destino estava vazio". Medido depois, arquivo a arquivo:
+`contexto_2026-09-23.csv` com 2.013.201 bytes na origem e no destino,
+mtime idêntico ao milissegundo; o mesmo para os demais.
+
+Os arquivos estavam lá o tempo todo. **O defeito era da detecção de
+mudança**, não do destino.
+
+#### 33. A causa: comparar `st_mtime_ns` com `>` estrito
+
+A decisão de recopiar usava `st_o.st_mtime_ns > st_d.st_mtime_ns`. Isso
+parece exato e é **errado entre sistemas de arquivos diferentes**: o `G:`
+do cliente de sincronização guarda o carimbo com precisão menor que o
+NTFS, então a origem é sempre "mais nova" por nanossegundos e **todo
+arquivo era recopiado em toda passada**.
+
+O estrago não foi o trabalho extra. Foi que `inalterados` ficava
+permanentemente em zero, e **isso foi lido como perda de dados, e um
+incidente que não houve foi afirmado.**
+
+Corrigido com tolerância de 2 s — a mesma do `rsync`, pelo mesmo motivo.
+Depois da correção: `copiados=1, inalterados=13`, o esperado para uma
+série append-only com um arquivo crescendo.
+
+**A lição não é sobre nanossegundos.** É que um instrumento cuja saída
+alguém interpreta precisa ser verificado antes da interpretação. Os
+bytes só foram medidos depois de a acusação já estar escrita.
+
+#### 34. Os quatro defeitos reais que o episódio expôs
+
+**(a) O destino morava em dois lugares.** Estava no
+`iniciar_poller.bat`, onde só o poller o enxergava. O procedimento
+documentado no README — *"rode `python backup.py
+--confirmar-replicacao`"* — **não funcionava num shell limpo**. Pior: se
+o `.bat` declarasse um caminho e o ambiente do usuário outro, o poller e
+a pessoa copiariam para pastas **diferentes**, cada um achando que era a
+mesma. Duas cópias parciais, duas sensações de backup completo.
+
+Agora há **fonte única**: `destino_backup.txt`, lido pelos dois. Se a
+variável de ambiente e o arquivo discordarem, `destino()` **levanta** em
+vez de escolher no escuro. Gate 1b testa o conflito.
+
+**(b) O poller não tentava de novo.** Às 15:52Z ele subiu e o backup
+falhou porque **o `G:` ainda não estava montado** — o cliente monta no
+logon e o poller sobe antes. O dia era marcado como tentado *antes* de
+saber o resultado, então uma falha na subida matava o backup daquele dia
+inteiro. Com a máquina desligada toda noite, isso significaria backup
+automático falhando em **todo boot, para sempre**, com o log gritando uma
+vez por dia e nada sendo feito.
+
+Agora o dia só é marcado no **sucesso**, e a falha reagenda em 10 min.
+
+**(c) O atestado era automatizável.** Ele é a única peça do sistema que
+não pode ser, porque existe precisamente porque nenhum código consegue
+verificar se o serviço replicou. E o campo `quem` não protege: registra a
+conta do Windows, e qualquer processo rodando como o usuário assina com o
+nome dele.
+
+Agora exige **teclado interativo e a palavra `CONFIRMO`**. `stdin` que
+não seja terminal é recusado. Verificado: um processo não consegue
+assinar. **Um elo humano automatizável não é elo nenhum.**
+
+**(d) A contagem incluía o próprio instrumento** — de novo. O
+`INSTANTANEO_*.json` entrava em `arquivos_no_destino`, o que quebrava o
+detector de esvaziamento. Terceira ocorrência desta família. Agora há uma
+definição única, `e_dado()`, usada nos três lugares.
+
+#### 35. O detector de esvaziamento, que ficou de pé
+
+Mesmo sendo falso alarme desta vez, o cenário é real: se o destino for
+esvaziado, um atestado anterior continuaria valendo, porque estava
+amarrado ao **caminho** e não ao conteúdo.
+
+Agora a cópia detecta o esvaziamento — cópia anterior registrava N
+arquivos, esta recopiou todos sem encontrar nenhum igual —, grava o
+carimbo, **persiste a marca nas cópias seguintes**, e
+`exigir_atestado_posterior_ao_zeramento()` reprova atestado anterior ao
+evento.
+
+`backup.py`: **54/54**.
+
+#### 36. E o bloco de isolamento pegou o próprio autor, de novo
+
+Ao inserir os testes novos, eles foram colocados **depois** do `finally`
+que desfaz o redirecionamento do status. Rodaram apontando para o status
+de **produção** e o sobrescreveram com dados de pasta temporária — o
+mesmo vazamento de horas antes, pela terceira vez no mesmo arquivo.
+
+O **bloco 4 reprovou**, que é exatamente para isso que ele existe. A
+limpeza foi movida para o fim, com um comentário dizendo que bloco novo
+entra acima dela.
+
+E a falha quase foi atribuída ao poller, por hipótese, antes de alguém
+ler o conteúdo do status. Ele dizia `origem: ...\Temp\backup_teste_...`.
+A hipótese confortável estava errada e o arquivo dizia isso.
+
+#### 37. Wake on RTC: acionado
+
+O autor ativou, na BIOS, despertar automático às **06:00 locais,
+diário**. A lacuna de 13 min em 15:39–15:51Z foi essa configuração sendo
+feita, não defeito.
+
+**Efeito esperado sobre o ponto cego:** a interseção das janelas de falha
+era `08:49–11:50 UTC`. Com a máquina ligando às 06:00 locais = **09:00
+UTC**, a faixa `09:00–11:50 UTC` passa a ser coberta em toda noite cuja
+parada tenha sido anterior. A interseção encolhe para, no máximo,
+`08:49–09:00 UTC` — onze minutos —, e as horas `09:00–10:59`, que estavam
+em **zero absoluto nos sete dias**, deixam de estar.
+
+Isto é **previsão, não medição**. Será verificado com `cobertura.py`
+depois de alguns dias, e o resultado entra aqui com a data.
+
+E há um efeito colateral: o boot por RTC vai reproduzir **toda manhã** a
+corrida entre o poller e a montagem do `G:`. A retentativa do item (b)
+deixa de ser detalhe e passa a ser o que faz o backup automático existir.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-28 |
+| eventos na base nesta data | **zero** |
+| perda de dados | **nenhuma** — afirmação anterior retratada |
+| destino | fonte única em `destino_backup.txt` |
+| retentativa do poller | 10 min, dia marcado só no sucesso |
+| atestado | exige teclado e a palavra `CONFIRMO` |
+| atestado atual | **apagado**; precisa ser refeito |
+| Wake on RTC | **acionado**, 06:00 locais |
+| `backup.py` | 54/54 |

@@ -74,6 +74,13 @@ NOME_STATUS = "backup_status.json"
 # poller.log NAO entra aqui. O CSV diz QUAIS minutos faltaram e o log
 # diz POR QUE; perder o log e perder metade do registro.
 EXCLUIDOS = ("poller.lock",)
+
+# Prefixo dos arquivos que o PROPRIO backup escreve no destino.
+# Conta-los como dado inflava `arquivos_no_destino` e quebrou o
+# detector de zeramento: n_antes ficava 15 quando havia 14 arquivos
+# de dado, e a condicao `copiados >= n_antes` nunca era satisfeita.
+# Terceira vez que uma contagem incluiu o proprio instrumento.
+PREFIXOS_DO_INSTRUMENTO = ("INSTANTANEO_",)
 HORAS_MAX = 24
 
 # --------------------------------------------------------------------
@@ -165,13 +172,68 @@ def caminho_atestado():
     return os.path.join(os.path.dirname(caminho_status()), NOME_ATESTADO)
 
 
+NOME_CONFIG = "destino_backup.txt"
+
+
+def caminho_config():
+    """Ao lado do status: a FONTE UNICA do destino nesta maquina."""
+    return os.path.join(os.path.dirname(caminho_status()), NOME_CONFIG)
+
+
+def ler_config():
+    """O destino declarado no arquivo, ou None. Ignora comentarios."""
+    try:
+        with open(caminho_config(), encoding="utf-8") as f:
+            for linha in f:
+                linha = linha.strip()
+                if linha and not linha.startswith("#"):
+                    return linha
+    except OSError:
+        pass
+    return None
+
+
 def destino():
-    d = os.environ.get("SNIPER_BACKUP_DIR", "").strip()
+    """
+    O destino do backup, de FONTE UNICA.
+
+    Precedencia: variavel de ambiente, depois `destino_backup.txt`. Se as
+    duas existirem e DISCORDAREM, isto levanta em vez de escolher.
+
+    POR QUE O CONFLITO LEVANTA
+    --------------------------
+    Ate 28/09/2026 o destino morava so no `iniciar_poller.bat`, onde
+    apenas o poller o enxergava. O procedimento documentado no README -
+    "rode python backup.py --confirmar-replicacao" - NAO funcionava num
+    shell limpo, e qualquer um que seguisse a documentacao batia em erro.
+    Pior que a inconveniencia: se o .bat definisse um caminho e o
+    ambiente do usuario outro, o poller e a pessoa copiariam para pastas
+    DIFERENTES, cada um achando que era a mesma. Duas copias parciais,
+    duas sensacoes de backup completo.
+
+    Por isso: fonte unica, e discordancia e excecao, nunca preferencia
+    silenciosa.
+
+    E continua SEM default no fonte. Um default apontando para dentro
+    desta maquina seria um backup que nao e backup, e pareceria um.
+    """
+    amb = os.environ.get("SNIPER_BACKUP_DIR", "").strip()
+    arq = (ler_config() or "").strip()
+    if amb and arq and os.path.normcase(os.path.abspath(amb)) != \
+            os.path.normcase(os.path.abspath(arq)):
+        raise BackupInvalido(
+            f"destino declarado em DOIS lugares, e eles discordam:\n"
+            f"  SNIPER_BACKUP_DIR = {amb!r}\n"
+            f"  {NOME_CONFIG}      = {arq!r}\n"
+            f"Isto nao e escolhido no escuro: o poller usaria um e voce o "
+            f"outro, cada um achando que e o mesmo. Apague um dos dois.")
+    d = amb or arq
     if not d:
         raise BackupInvalido(
-            "SNIPER_BACKUP_DIR nao definida. Sem default no fonte: um "
-            "default apontando para dentro desta maquina seria um backup "
-            "que nao e backup, e pareceria um.")
+            f"destino nao declarado. Crie {caminho_config()} com o caminho "
+            f"numa linha, ou defina SNIPER_BACKUP_DIR. Sem default no "
+            f"fonte: um default apontando para dentro desta maquina seria "
+            f"um backup que nao e backup, e pareceria um.")
     return d
 
 
@@ -296,8 +358,24 @@ def copiar(origem=None, dest=None, verificar_digest=True):
             precisa = True
             if os.path.exists(d):
                 st_d = os.stat(d)
+                # TOLERANCIA DE MTIME, e ela nao e frouxidao.
+                #
+                # Comparar st_mtime_ns com `>` estrito parece exato e e
+                # ERRADO entre sistemas de arquivos diferentes: o G: do
+                # cliente de sincronizacao guarda o carimbo com precisao
+                # menor que o NTFS, entao a origem e SEMPRE "mais nova"
+                # por alguns nanossegundos e TODO arquivo era recopiado
+                # em toda passada.
+                #
+                # O estrago nao foi o trabalho extra: `inalterados` ficava
+                # permanentemente em 0, e em 28/09/2026 eu li isso como
+                # "o destino foi esvaziado" e afirmei perda de dados que
+                # nao houve. O detector de zeramento so funciona se esta
+                # comparacao funcionar.
+                #
+                # 2 s e a tolerancia classica do rsync, pelo mesmo motivo.
                 precisa = (st_o.st_size != st_d.st_size
-                           or st_o.st_mtime_ns > st_d.st_mtime_ns)
+                           or st_o.st_mtime > st_d.st_mtime + 2.0)
             if not precisa:
                 iguais += 1
                 continue
@@ -316,8 +394,7 @@ def copiar(origem=None, dest=None, verificar_digest=True):
     # da SEGUNDA execucao - metrica que muda de definicao sozinha entre
     # a primeira e a segunda rodada. O autoteste pegou isso.
     no_destino = [n for n in os.listdir(alvo)
-                  if os.path.isfile(os.path.join(alvo, n))
-                  and n != NOME_STATUS and n not in EXCLUIDOS]
+                  if os.path.isfile(os.path.join(alvo, n)) and e_dado(n)]
     faltando = sorted(
         n for n in os.listdir(origem)
         if os.path.isfile(os.path.join(origem, n))
@@ -341,6 +418,42 @@ def copiar(origem=None, dest=None, verificar_digest=True):
     # nao se justifica como copia externa, e o registro dizia que estava
     # tudo bem. Aconteceu em 28/09/2026, quando o autoteste - que roda
     # com o guarda desligado - escreveu no status de producao.
+    # ------------------------------------------------------------------
+    # DESTINO ZERADO: a copia sumiu e ninguem notou
+    #
+    # Em 28/09/2026 14:58Z 14 arquivos foram copiados para o G:. As
+    # 15:03Z alguem atestou ter visto os arquivos la. As 15:39Z a sessao
+    # caiu; as 15:52Z o poller subiu e o G: nem existia ainda; as 15:57Z
+    # uma copia nova reportou `copiados=14, inalterados=0` - ou seja, o
+    # destino estava VAZIO.
+    #
+    # O cliente remontou e o que nao tinha terminado de subir nao voltou.
+    # O atestado continuou valido, apontando para um conteudo que ja nao
+    # existia, porque ele estava amarrado ao CAMINHO e nao ao conteudo.
+    #
+    # Assinatura do evento: a copia anterior dizia haver N arquivos no
+    # destino, e esta copiou todos de novo sem encontrar nenhum igual.
+    # Isso invalida o atestado - o que a pessoa viu nao esta mais la.
+    # ------------------------------------------------------------------
+    anterior = None
+    try:
+        with open(os.path.join(alvo, NOME_STATUS), encoding="utf-8") as f:
+            anterior = json.load(f)
+    except (OSError, ValueError):
+        anterior = ler_status()
+    n_antes = (anterior or {}).get("arquivos_no_destino") or 0
+    zerado = bool(n_antes and iguais == 0 and copiados >= n_antes)
+    status["destino_foi_zerado"] = zerado
+    if zerado:
+        status["zerado_em_utc"] = status["quando_utc"]
+        status["zerado_detalhe"] = (
+            f"a copia anterior registrava {n_antes} arquivos no destino e "
+            f"esta recopiou {copiados} sem encontrar nenhum inalterado: o "
+            f"destino foi esvaziado entre as duas")
+    elif anterior and anterior.get("zerado_em_utc"):
+        status["zerado_em_utc"] = anterior["zerado_em_utc"]
+        status["zerado_detalhe"] = anterior.get("zerado_detalhe", "")
+
     if status["por_que_conta_como_copia"] == "sem justificativa":
         erros.append(
             "destino sem justificativa de copia externa: nao esta em outro "
@@ -375,14 +488,66 @@ def ler_status():
         return None
 
 
-def confirmar_replicacao(quem="", dest=None):
+PALAVRA_CONFIRMACAO = "CONFIRMO"
+
+
+class ConfirmacaoNaoInterativa(Exception):
+    """
+    Tentaram assinar o atestado sem um teclado do outro lado.
+
+    O atestado e a UNICA peca deste sistema que nao pode ser
+    automatizada. Ele existe precisamente porque nenhum codigo consegue
+    verificar se o servico replicou - so uma pessoa abrindo o navegador
+    consegue.
+
+    Um atestado gerado por um processo nao e uma verificacao mais fraca:
+    e ZERO verificacao com aparencia de verificacao. Pior que nao ter,
+    porque o porteiro passa a aprovar.
+
+    E o campo `quem` nao protege: ele registra a conta do Windows, e
+    qualquer processo rodando como o usuario assina com o nome dele. O
+    arquivo nao distingue a pessoa de um agente.
+
+    Por isso a assinatura exige digitar a palavra no teclado, com stdin
+    interativo. Um elo humano automatizavel nao e elo nenhum.
+    """
+
+
+def exigir_teclado():
+    """Recusa assinar quando nao ha pessoa do outro lado."""
+    if not sys.stdin or not sys.stdin.isatty():
+        raise ConfirmacaoNaoInterativa(
+            "stdin nao e um terminal. O atestado de replicacao nao pode "
+            "ser assinado por processo, pipe, redirecionamento ou tarefa "
+            "agendada - ele e a unica peca do sistema que depende de "
+            "alguem ter olhado. Rode este comando digitando num terminal.")
+    print("Digite %s para assinar, ou qualquer outra coisa para abortar."
+          % PALAVRA_CONFIRMACAO)
+    try:
+        resposta = input("> ").strip()
+    except (EOFError, OSError) as e:
+        raise ConfirmacaoNaoInterativa(
+            f"nao foi possivel ler do teclado: {e}") from e
+    if resposta != PALAVRA_CONFIRMACAO:
+        raise ConfirmacaoNaoInterativa(
+            f"resposta {resposta!r} nao e {PALAVRA_CONFIRMACAO!r}. "
+            f"Nada foi assinado.")
+    return True
+
+
+def confirmar_replicacao(quem="", dest=None, exigir_pessoa=True):
     """
     Grava o atestado humano de que a replicacao para fora do disco ocorreu.
 
     NAO e medicao. E a afirmacao datada de uma pessoa que abriu o
     servico na web e viu os arquivos la. Fica escrito no proprio
     atestado para que ninguem confunda as duas coisas depois.
+
+    `exigir_pessoa=False` existe SO para o autoteste. Em uso normal a
+    assinatura exige teclado - ver ConfirmacaoNaoInterativa.
     """
+    if exigir_pessoa:
+        exigir_teclado()
     alvo = os.path.join(conferir_destino(dest or destino()),
                         os.path.basename(os.path.abspath(DIR_EXECUCAO)))
     agora_ = agora()
@@ -444,6 +609,33 @@ def exigir_atestado(alvo):
             f"--confirmar-replicacao")
     at["_dias_restantes"] = (limite - idade).days
     return at
+
+
+def exigir_atestado_posterior_ao_zeramento(at, status):
+    """
+    O atestado tem de ser MAIS NOVO que o ultimo esvaziamento do destino.
+
+    Um atestado anterior testemunhou arquivos que ja nao estao la. Estar
+    dentro do prazo nao basta: o conteudo mudou de identidade, nao so de
+    idade.
+    """
+    marca = (status or {}).get("zerado_em_utc")
+    if not marca:
+        return
+    try:
+        quando_z = datetime.fromisoformat(marca)
+        quando_a = datetime.fromisoformat(at["quando_utc"])
+    except (KeyError, ValueError):
+        raise BackupVencido(
+            "ha registro de esvaziamento do destino com carimbo ilegivel; "
+            "reconfirme a replicacao por seguranca.")
+    if quando_a <= quando_z:
+        raise BackupVencido(
+            f"o destino foi ESVAZIADO em {marca}, depois do atestado de "
+            f"{at['quando_utc']}. O que foi conferido nao esta mais la - "
+            f"a copia atual e outra. {(status or {}).get('zerado_detalhe','')}"
+            f" Confira de novo na web e rode: python backup.py "
+            f"--confirmar-replicacao")
 
 
 def verificar_frescor(horas_max=HORAS_MAX, exigir_replicacao=True):
@@ -517,6 +709,8 @@ def verificar_frescor(horas_max=HORAS_MAX, exigir_replicacao=True):
 
     if exigir_replicacao:
         at = exigir_atestado(alvo)
+        exigir_atestado_posterior_ao_zeramento(at, remoto)
+        exigir_atestado_posterior_ao_zeramento(at, s)
         faltam = at.get("_dias_restantes")
         extra = (f"; replicacao confirmada por {at['quem']} em "
                  f"{at['quando_utc']} (afirmacao humana, "
@@ -551,6 +745,12 @@ def verificar_frescor(horas_max=HORAS_MAX, exigir_replicacao=True):
 # Isto sobrevive aos dois destinos. Mesmo que as duas copias morram, o
 # manifesto no git prova o que os arquivos eram naquela data.
 # --------------------------------------------------------------------
+def e_dado(nome):
+    """True se o arquivo e dado coletado, nao artefato do instrumento."""
+    return (nome != NOME_STATUS and nome not in EXCLUIDOS
+            and not nome.startswith(PREFIXOS_DO_INSTRUMENTO))
+
+
 def _sha_prefixo(caminho, n, blocos=1 << 20):
     h = hashlib.sha256()
     lidos = 0
@@ -572,7 +772,7 @@ def manifesto(origem=None):
     fora = {}
     for nome in sorted(os.listdir(origem)):
         cam = os.path.join(origem, nome)
-        if not os.path.isfile(cam) or nome in EXCLUIDOS or nome == NOME_STATUS:
+        if not os.path.isfile(cam) or not e_dado(nome):
             continue
         n = os.path.getsize(cam)
         fora[nome] = {"bytes": n, "sha256_prefixo": _sha_prefixo(cam, n)}
@@ -868,9 +1068,11 @@ def autoteste():
         r.append(_ok(os.path.exists(os.path.join(alvo, NOME_STATUS)),
                      "o destino carrega o proprio status"))
     finally:
+        # NAO desfaz o redirecionamento nem apaga o temp aqui: ha blocos
+        # depois deste que ainda precisam dos dois. Em 28/09/2026 a
+        # limpeza morava aqui, o bloco 3c foi inserido depois dela, e
+        # escreveu no status de PRODUCAO. O bloco 4 pegou.
         os.environ.pop("OneDrive", None)
-        _STATUS_ALT = None
-        shutil.rmtree(base, ignore_errors=True)
 
     print(chr(10) + "3b. INSTANTANEO: APPEND E OK, REESCRITA NAO")
     inst_dir = os.path.join(base, "inst")
@@ -930,6 +1132,79 @@ def autoteste():
                  "hash do arquivo inteiro muda, o do prefixo nao",
                  "por isso o criterio e o prefixo"))
 
+    print(chr(10) + "3c. TOLERANCIA DE MTIME E DETECCAO DE ZERAMENTO")
+    # (a) carimbo do destino um pouco mais velho, mesmo tamanho: o
+    # sistema de arquivos do cliente de sincronizacao guarda mtime com
+    # precisao menor, e comparar com `>` estrito recopiava tudo sempre.
+    # mesma disciplina do bloco 3: o temp e DECLARADO raiz sincronizada
+    # pela variavel do sistema, em vez de desligar o guarda com stub.
+    os.environ["OneDrive"] = base
+    zdir = os.path.join(base, "zera")
+    os.makedirs(zdir, exist_ok=True)
+    zorig = os.path.join(base, "zorig")
+    os.makedirs(zorig, exist_ok=True)
+    for nome in ("x.csv", "y.csv", "z.csv"):
+        with open(os.path.join(zorig, nome), "wb") as f:
+            f.write(b"ts,v" + NL + b"1,1" + NL)
+    s1 = copiar(zorig, zdir, verificar_digest=False)
+    r.append(_ok(s1["copiados"] == 3, "primeira copia leva os tres"))
+    zalvo = os.path.join(zdir, os.path.basename(zorig))
+    for nome in os.listdir(zalvo):
+        cam = os.path.join(zalvo, nome)
+        st = os.stat(cam)
+        os.utime(cam, (st.st_atime, st.st_mtime - 1.0))   # 1 s mais velho
+    s2 = copiar(zorig, zdir, verificar_digest=False)
+    r.append(_ok(s2["copiados"] == 0 and s2["inalterados"] == 3,
+                 "destino 1 s mais velho NAO e recopiado",
+                 "dentro da tolerancia de 2 s"))
+    for nome in os.listdir(zalvo):
+        cam = os.path.join(zalvo, nome)
+        st = os.stat(cam)
+        os.utime(cam, (st.st_atime, st.st_mtime - 30.0))  # 30 s mais velho
+    s3 = copiar(zorig, zdir, verificar_digest=False)
+    r.append(_ok(s3["copiados"] == 3, "destino 30 s mais velho E recopiado",
+                 "fora da tolerancia"))
+
+    # (b) zeramento de verdade: apagar tudo no destino e recopiar
+    for nome in os.listdir(zalvo):
+        os.remove(os.path.join(zalvo, nome))
+    s4 = copiar(zorig, zdir, verificar_digest=False)
+    r.append(_ok(s4.get("destino_foi_zerado") is True,
+                 "destino esvaziado e DETECTADO", s4.get("zerado_detalhe", "")))
+    r.append(_ok(bool(s4.get("zerado_em_utc")), "com carimbo do evento"))
+    s5 = copiar(zorig, zdir, verificar_digest=False)
+    r.append(_ok(s5.get("destino_foi_zerado") is False
+                 and s5.get("zerado_em_utc") == s4.get("zerado_em_utc"),
+                 "a marca do zeramento PERSISTE na copia seguinte",
+                 "senao o atestado voltaria a valer sozinho"))
+
+    # (c) atestado anterior ao zeramento nao vale
+    velho = {"quando_utc": iso(agora() - timedelta(hours=1)), "quem": "t"}
+    try:
+        exigir_atestado_posterior_ao_zeramento(velho, s4)
+        r.append(_ok(False, "atestado anterior ao zeramento REPROVA",
+                     "nao reprovou"))
+    except BackupVencido:
+        r.append(_ok(True, "atestado anterior ao zeramento REPROVA"))
+    novo = {"quando_utc": iso(agora() + timedelta(seconds=5)), "quem": "t"}
+    try:
+        exigir_atestado_posterior_ao_zeramento(novo, s4)
+        r.append(_ok(True, "atestado posterior ao zeramento vale"))
+    except BackupVencido as e:
+        r.append(_ok(False, "atestado posterior ao zeramento vale", str(e)[:50]))
+
+    # (d) o instrumento nao se conta como dado
+    r.append(_ok(not e_dado("INSTANTANEO_2026-09-28.json")
+                 and not e_dado(NOME_STATUS) and not e_dado("poller.lock")
+                 and e_dado("contexto_2026-09-28.csv"),
+                 "artefatos do instrumento nao contam como dado"))
+    os.environ.pop("OneDrive", None)
+
+    # LIMPEZA, depois de TODOS os blocos que usam o temp. Qualquer bloco
+    # novo entra ACIMA desta linha.
+    _STATUS_ALT = None
+    shutil.rmtree(base, ignore_errors=True)
+
     print(chr(10) + "4. ISOLAMENTO: O TESTE NAO TOCOU PRODUCAO")
     depois = (_impressao(prod_status), _impressao(prod_atestado))
     r.append(_ok(antes[0] == depois[0],
@@ -960,11 +1235,16 @@ def main(argv):
         print("disco com status dizendo 'em dia'. Por isso a confirmacao")
         print("e humana, e por isso ela fica registrada como humana.")
         print("")
+        print("Por isso tambem ela exige TECLADO: um processo nao pode")
+        print("assinar. O campo `quem` registra a conta do Windows, e")
+        print("qualquer processo rodando como voce assinaria com o seu")
+        print("nome - o arquivo nao distingue voce de um agente.")
+        print("")
         try:
             at = confirmar_replicacao(quem=" ".join(
                 a for a in argv if not a.startswith("--")))
-        except BackupInvalido as e:
-            print("FALHOU: %s" % e)
+        except (BackupInvalido, ConfirmacaoNaoInterativa) as e:
+            print("NAO ASSINADO: %s" % e)
             return 1
         print("registrado: %s por %s" % (at["quando_utc"], at["quem"]))
         print("destino:    %s" % at["destino"])

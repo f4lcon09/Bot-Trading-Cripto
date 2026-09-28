@@ -65,3 +65,7 @@ config_local.py
 # ====================================================================
 backup_status.json
 backup.log
+
+# Caminho do backup NESTA maquina. O exemplo e versionado;
+# o real nao, porque e configuracao local.
+destino_backup.txt

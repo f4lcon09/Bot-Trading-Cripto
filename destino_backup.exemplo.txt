@@ -1,0 +1,19 @@
+# ====================================================================
+# DESTINO DO BACKUP - FONTE UNICA
+#
+# Uma linha, o caminho, sem aspas. Linhas com # sao ignoradas.
+#
+# Ate 28/09/2026 este caminho morava so no iniciar_poller.bat, onde
+# apenas o poller o enxergava. O procedimento do README - "rode
+# python backup.py --confirmar-replicacao" - NAO funcionava num shell
+# limpo, e quem seguisse a documentacao batia em erro.
+#
+# Pior que a inconveniencia: se o .bat definisse um caminho e o
+# ambiente do usuario outro, o poller e a pessoa copiariam para pastas
+# DIFERENTES, cada um achando que era a mesma. Duas copias parciais,
+# duas sensacoes de backup completo.
+#
+# Este arquivo NAO e versionado: o caminho e desta maquina. Ver
+# destino_backup.exemplo.txt no repositorio.
+# ====================================================================
+G:CaminhoParaSniperV2_backup

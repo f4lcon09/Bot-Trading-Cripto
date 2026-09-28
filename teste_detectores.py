@@ -561,8 +561,16 @@ def teste_destino_ausente_reprova():
     from config import DIR_EXECUCAO
 
     # (a) caminho inexistente dentro de um volume que existe
-    raiz_real = os.environ.get("SNIPER_BACKUP_DIR") or os.path.dirname(
-        os.path.abspath(DIR_EXECUCAO))
+    # FONTE UNICA: pergunta ao backup qual e o destino, em vez de ler a
+    # variavel de ambiente. Consultar o ambiente aqui reproduziria,
+    # dentro do teste, a duplicacao que o destino_backup.txt existe
+    # para eliminar.
+    try:
+        raiz_real = backup.destino()
+    except backup.BackupInvalido:
+        raiz_real = None
+    if raiz_real is None:
+        raiz_real = os.path.dirname(os.path.abspath(DIR_EXECUCAO))
     fantasma = os.path.join(raiz_real, "_NAO_EXISTE_teste_gate1b")
     if os.path.isdir(fantasma):
         checar("o caminho de teste nao deveria existir", False, fantasma)
@@ -600,15 +608,42 @@ def teste_destino_ausente_reprova():
         except backup.BackupInvalido:
             checar("volume ausente e recusado", True, sumido)
 
+    # (b2) destino declarado em DOIS lugares discordantes tem de levantar
+    salvo_amb = os.environ.get("SNIPER_BACKUP_DIR")
+    try:
+        atual = backup.ler_config()
+        if atual:
+            os.environ["SNIPER_BACKUP_DIR"] = atual + "_OUTRO"
+            try:
+                backup.destino()
+                checar("destino em dois lugares discordantes levanta",
+                       False, "escolheu um no escuro")
+            except backup.BackupInvalido as e:
+                checar("destino em dois lugares discordantes levanta",
+                       "discordam" in str(e), "BackupInvalido")
+            os.environ["SNIPER_BACKUP_DIR"] = atual
+            checar("e concordantes NAO levantam",
+                   backup.destino() == atual)
+        else:
+            checar("ha destino_backup.txt para testar o conflito", False)
+    finally:
+        if salvo_amb is None:
+            os.environ.pop("SNIPER_BACKUP_DIR", None)
+        else:
+            os.environ["SNIPER_BACKUP_DIR"] = salvo_amb
+
     # (c) o volume atual do backup e mesmo distinto, perguntado ao sistema
-    st = os.environ.get("SNIPER_BACKUP_DIR")
+    try:
+        st = backup.destino()
+    except backup.BackupInvalido:
+        st = None
     if st and os.path.isdir(st):
         checar("o destino configurado esta em volume distinto",
                not backup.mesmo_volume(st, DIR_EXECUCAO),
                backup.justificativa_destino(st))
     else:
-        checar("SNIPER_BACKUP_DIR definida e existente", False,
-               "nao ha destino configurado nesta sessao")
+        checar("destino de backup declarado e existente", False,
+               "crie destino_backup.txt ou defina SNIPER_BACKUP_DIR")
 
 
 def main():

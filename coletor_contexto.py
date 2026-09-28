@@ -156,6 +156,11 @@ def aviso(msg):
 # para o poller.log na subida. Se o furo continuar aparecendo, o log
 # distingue "nunca pedimos" de "pedimos e suspendeu de todo jeito".
 # --------------------------------------------------------------------
+# Minutos ate a nova tentativa de backup depois de uma falha. A causa
+# mais provavel de falha logo apos a subida e a letra do cliente de
+# sincronizacao ainda nao montada - isso cura sozinho em minutos.
+BACKUP_RETENTATIVA_MIN = 10
+
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 
@@ -376,6 +381,7 @@ class Coletor:
     def __init__(self):
         self.parar = False
         self._backup_feito_em = None
+        self._backup_proxima_tentativa_ms = 0
         self.ultimo_ok_ms = None
         self.falha_desde = None
         os.makedirs(DIR_EXECUCAO, exist_ok=True)
@@ -539,12 +545,31 @@ class Coletor:
         hoje = dia(agora_ms())
         if self._backup_feito_em == hoje:
             return
-        self._backup_feito_em = hoje
+        # RETENTATIVA, e ela nao e detalhe.
+        #
+        # Em 28/09/2026 15:52Z o poller subiu e o backup falhou porque o
+        # `G:` do cliente de sincronizacao ainda NAO ESTAVA MONTADO - ele
+        # monta no logon, e o poller sobe antes. Na primeira versao deste
+        # metodo o dia era marcado como tentado ANTES de saber o
+        # resultado, entao uma falha na subida matava o backup daquele
+        # dia inteiro. Como a maquina e desligada toda noite, isso
+        # significaria backup automatico falhando em TODO boot, para
+        # sempre, com o log gritando uma vez por dia e nada sendo feito.
+        #
+        # Agora o dia so e marcado no SUCESSO, e a falha reagenda.
+        if agora_ms() < self._backup_proxima_tentativa_ms:
+            return
         try:
             import backup
             s = backup.copiar()
+            self._backup_feito_em = hoje          # SO no sucesso
             aviso(f"[{humano(agora_ms())}] backup ok: "
                   f"{s['arquivos_no_destino']} arquivos em {s['destino']}")
+            if s.get("destino_foi_zerado"):
+                aviso(f"[{humano(agora_ms())}] DESTINO FOI ESVAZIADO: "
+                      f"{s.get('zerado_detalhe')}. O atestado de replicacao "
+                      f"anterior nao vale mais - o que foi conferido nao "
+                      f"esta mais la.")
             # A copia ter funcionado nao diz que a REPLICACAO esta valida:
             # o atestado humano vence em 30 dias, e o porteiro so e
             # consultado quando alguem o roda. Aqui o poller avisa
@@ -557,11 +582,15 @@ class Coletor:
                 aviso(f"[{humano(agora_ms())}] BACKUP SEM REPLICACAO "
                       f"VALIDA: {e}")
         except Exception as e:  # noqa: BLE001
-            # Grita e segue. E deixa o dia marcado como tentado para nao
-            # entrar em laco de falha a cada minuto.
+            # Grita, reagenda e segue. O dia NAO e marcado: a causa mais
+            # provavel de falha na subida e o `G:` ainda nao montado, e
+            # essa cura sozinha em minutos. Reagendar em 10 min evita
+            # tanto o laco de falha a cada minuto quanto o dia perdido.
+            self._backup_proxima_tentativa_ms = (
+                agora_ms() + BACKUP_RETENTATIVA_MIN * 60_000)
             aviso(f"[{humano(agora_ms())}] BACKUP FALHOU: "
-                  f"{type(e).__name__}: {e}. A coleta CONTINUA, mas os "
-                  f"dados de hoje estao sem copia.")
+                  f"{type(e).__name__}: {e}. A coleta CONTINUA; nova "
+                  f"tentativa em {BACKUP_RETENTATIVA_MIN} min.")
 
 
 def main():
