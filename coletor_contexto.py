@@ -375,6 +375,7 @@ def ultimo_registrado_ms():
 class Coletor:
     def __init__(self):
         self.parar = False
+        self._backup_feito_em = None
         self.ultimo_ok_ms = None
         self.falha_desde = None
         os.makedirs(DIR_EXECUCAO, exist_ok=True)
@@ -509,12 +510,47 @@ class Coletor:
                 espera = min(espera * 2, BACKOFF_MAX_S)
                 continue
 
+            self._talvez_backup()
+
             # dorme ate a virada do proximo minuto
             alvo = ((agora_ms() // MS_POR_MINUTO) + 1) * MS_POR_MINUTO
             while not self.parar and agora_ms() < alvo:
                 time.sleep(min(1.0, (alvo - agora_ms()) / 1000.0))
 
         self.registrar_falha("encerrado")
+
+    def _talvez_backup(self):
+        """
+        Uma copia por dia, de dentro do processo que ja esta supervisionado.
+
+        POR QUE AQUI: um backup que depende de alguem lembrar para de
+        rodar no dia em que esquecem, EM SILENCIO - que e o modo de
+        falha que a invariante 11 proibe. O poller e o unico processo do
+        projeto com relogio correndo e com a tarefa do agendador em cima;
+        pendurar a copia nele e a forma de ela nao ser esquecida.
+
+        POR QUE NAO MATA O POLLER: coleta vale mais que copia. Se o
+        backup falhar, ele grita no log e a coleta continua - um minuto
+        perdido nao volta, uma copia perdida se refaz na hora seguinte.
+
+        Custa menos de um segundo para 12 MB e roda uma vez ao dia, fora
+        do caminho do poll.
+        """
+        hoje = dia(agora_ms())
+        if self._backup_feito_em == hoje:
+            return
+        self._backup_feito_em = hoje
+        try:
+            import backup
+            s = backup.copiar()
+            aviso(f"[{humano(agora_ms())}] backup ok: "
+                  f"{s['arquivos_no_destino']} arquivos em {s['destino']}")
+        except Exception as e:  # noqa: BLE001
+            # Grita e segue. E deixa o dia marcado como tentado para nao
+            # entrar em laco de falha a cada minuto.
+            aviso(f"[{humano(agora_ms())}] BACKUP FALHOU: "
+                  f"{type(e).__name__}: {e}. A coleta CONTINUA, mas os "
+                  f"dados de hoje estao sem copia.")
 
 
 def main():

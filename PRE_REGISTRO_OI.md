@@ -1226,3 +1226,187 @@ conserto silencioso.
 | cobertura agregada | 48%; 09:00–10:59 UTC em zero |
 | suspensão | bloqueada por código, com resultado logado |
 | tarefa em `Interativo apenas` | **não consertado**, decisão em aberto |
+
+### Fechamento do Adendo 2, parte 8 — cobertura com causa declarada, e o backup
+
+Escrito em 2026-09-28. **Zero eventos na base** da tese de OI.
+
+#### 19. A causa da cobertura, declarada em vez de inferida
+
+A cobertura subiu de 38% para 48% agregado e para 73–76% nos melhores
+dias. Essa melhora foi atribuída, em conversa, ao `SetThreadExecutionState`
+ou ao `powercfg`. **Nenhum dos dois existia.** O código só entrou em
+2026-09-28 e o `powercfg` segue intocado.
+
+Fica registrado porque inferir causa de código a partir de uma mudança
+no padrão dos motivos de falha é a mesma operação que este documento
+combate: ler um sinal como confirmação do mecanismo que se esperava
+encontrar.
+
+**A causa real, agora declarada pelo autor:** a máquina é **desligada
+deliberadamente para economizar energia**. Não é suspensão, não é
+logoff, não é defeito. É decisão operacional.
+
+Isso converte a cobertura de "causa desconhecida" em **premissa do
+desenho**, e tem três consequências:
+
+1. **Trocar a tarefa para `SYSTEM` está descartado.** Máquina desligada
+   não executa tarefa agendada, com conta nenhuma. Custaria privilégio
+   ampliado e revalidação de caminhos para comprar zero.
+2. **O `SetThreadExecutionState` cobre suspensão por ociosidade e nada
+   além.** Ele é correto e barato, e não toca no modo de falha dominante.
+3. **A cobertura depende de comportamento humano não modelado** e pode
+   regredir sem aviso. Está escrito aqui para que uma regressão futura
+   seja lida como mudança de hábito, não como defeito de software.
+
+#### 20. As seis janelas, e a borda que não randomizou
+
+| dia | janela UTC | minutos |
+| --- | --- | --- |
+| 23/09 | 04:22 → 11:50 | 449 |
+| 24/09 | 05:09 → 12:01 | 413 |
+| 25/09 | 05:44 → 12:10 | 387 |
+| 26/09 | 03:54 → 12:25 | 512 |
+| 27/09 | 08:49 → 14:39 | 351 |
+| 28/09 | 06:26 → 13:21 | 416 |
+
+Média: **421 min/dia, 29,3% do dia.** Teto de cobertura nesta máquina
+≈ 71%, coerente com os 73–76% observados.
+
+**A interseção das seis é `08:49–11:50 UTC`** — três horas ausentes em
+*todos* os dias. É por isso que o `cobertura.py` acusa 09:00–10:59 UTC em
+zero absoluto: a faixa está dentro da interseção, e as horas 08 e 11 só
+escapam por arredondamento de hora cheia.
+
+O diagnóstico fica mais preciso que "ponto cego estrutural":
+
+> **Os horários de início variam de 00:54 a 05:49 local — essa borda
+> randomizou. Os de fim estão agrupados entre 08:50 e 11:39, porque
+> dependem de alguém ligar a máquina de manhã. A borda que produz o
+> ponto cego é justamente a que não varia.**
+
+O Adendo já declarava que variar o horário do desligamento converte
+ausência sistemática em perda de poder. **Variar só uma borda não basta**
+— é preciso que a borda de fim varie também, e ela não depende de
+sorteio.
+
+**Alavanca disponível, não usada:** Wake on RTC na BIOS (`Resume by
+Alarm`, `Power On by RTC`) é o único mecanismo que liga a máquina a
+partir de S5 — o Agendador do Windows só desperta de suspensão. Com RTC
+às 04:00 local, o furo de 26/09 cairia de 8h31 para 3h06, e em cinco das
+seis noites a máquina estaria ligada durante a faixa `08:49–11:50 UTC`,
+**esvaziando a interseção**. É firmware da máquina, decisão do autor, e
+está registrado como alavanca conhecida e não acionada.
+
+#### 21. O calendário não é linear — e a curvatura é ao contrário do esperado
+
+O Adendo tabulou calendário a 37%, 60% e 100%, e ficou a tentação de ler
+72% por interpolação. `calendario.py` calcula em vez de interpolar:
+
+> P(qualifica | k eventos) = 1 − (1−c·pA)^k − (1−c·pB)^k + (1−c·pA−c·pB)^k
+
+Com `k = 1` o resultado é **sempre zero** — um evento não ocupa dois
+baldes. É daí que vem a curvatura.
+
+**Validação:** a 37% de cobertura e pA=pB=0,33, o modelo devolve
+**10,9 meses** — exatamente o número que o Adendo já publicava, obtido
+por outro caminho.
+
+| cobertura | pA=pB=0,25 | **0,33** | 0,40 |
+| --- | --- | --- | --- |
+| 37% | 15,1 meses | **10,9** | 9,0 |
+| 50% | 10,7 | 8,1 | 6,9 |
+| 60% | 8,9 | 6,9 | 5,9 |
+| **72% (atual)** | 7,5 | **5,9** | 5,2 |
+| 85% | 6,5 | 5,2 | 4,6 |
+| 100% | 5,7 | 4,7 | 4,1 |
+
+**À cobertura atual o calendário é 5,9 meses, não 10,9.**
+
+**E a intuição da curvatura estava errada.** O raciocínio de que exigir
+dois eventos faria a probabilidade cair perto do quadrado vale para dias
+de `k = 2`, e a distribuição real não é feita deles: 253 eventos em 72
+dias com evento, muitos deles com `k` alto, onde `P(qualifica)` **satura**.
+
+| taxa (pA=pB=0,33) | valor |
+| --- | --- |
+| a 100% de cobertura | 0,1197 dia qualificado / dia corrido |
+| a 50%, se fosse proporcional | 0,0599 |
+| **a 50%, medida** | **0,0693** |
+
+A função é **côncava**, não convexa: metade da cobertura rende **58%** da
+taxa, não 50% nem 25%. **Cada hora recuperada vale menos do que um
+modelo quadrático sugere**, e o argumento do Wake on RTC **não se
+sustenta pelo calendário**.
+
+Ele se sustenta por outra coisa, que esta tabela não mede: com
+`08:49–11:50 UTC` ausente em todos os dias, os eventos daquela faixa
+**nunca são observados**. Isso não é custo de calendário, é custo de
+**validade** — e mais dias não ensinam. A tabela inteira supõe cobertura
+aleatória no tempo; enquanto o ponto cego existir, ela é **teto
+otimista**.
+
+#### 22. O backup, que era o item mais caro em aberto
+
+Seis dias de OI, funding e mark price existiam **em um disco só**. O
+museu volta com dois comandos; isto não volta com nenhum, em lugar
+nenhum do mundo.
+
+**Primeira cópia em 2026-09-28T13:52Z: 14 arquivos, 12,6 MB**, para
+`OneDrive\SniperV2_backup\`.
+
+`backup.py`, 20/20 no autoteste:
+
+- **Aditivo, nunca espelho.** Arquivo removido na origem permanece no
+  destino.
+- **Recusa destino que não protege** — inexistente, dentro da origem, ou
+  no mesmo volume, *exceto* sob raiz sincronizada declarada pelo sistema
+  (`%OneDrive%`). A permissão é por variável de ambiente, **nunca por
+  nome de pasta**: uma pasta batizada "OneDrive" sem sincronização não
+  replica nada, e aceitar por nome deixaria passar exatamente o caso que
+  não protege. O status grava **por que** aquele destino conta.
+- **Falha ruidosa.** O poller copia uma vez ao dia e grita no log se
+  falhar, sem morrer — coleta vale mais que cópia. E o
+  `validacao_contexto.py` **reprova** se a última cópia passar de 24 h,
+  com ausência de status contando como vencido. O detector de silêncio
+  do backup é o porteiro que já recusa dado sujo, não um segundo
+  instrumento que também pode emudecer.
+
+Dois defeitos que o próprio autoteste pegou durante a construção, ambos
+da mesma família: `arquivos_no_destino` contava o `backup_status.json` —
+métrica que mudava de definição entre a primeira e a segunda execução — e
+depois contava o `poller.lock` vazio que o `copy2` cria antes de falhar.
+
+**O que este backup não é:** proteção contra exclusão acidental. O
+OneDrive sincroniza exclusões; a lixeira de 30 dias é a única rede. Ele
+protege contra o risco declarado, que é o disco morrer.
+
+#### 23. A migração para 24 h não conserta o passado
+
+Registrado com estas palavras, porque a tentação de tratar o buraco como
+transitório vai existir:
+
+> **Migrar para 24 h não conserta retroativamente os 29% já perdidos.**
+> Os dias que já existem carregam o buraco para sempre, e a data da
+> migração vira a fronteira entre dois regimes de amostragem.
+
+O Adendo já exige que a passagem para cobertura contínua seja registrada
+por novo adendo. Isto reforça o motivo: não é formalidade de registro, é
+que **os dois períodos não são a mesma amostra** e qualquer análise que
+os junte precisa dizer que os juntou.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-28 |
+| eventos na base nesta data | **zero** |
+| causa da cobertura | **desligamento deliberado**, declarado pelo autor |
+| `SYSTEM` na tarefa | **descartado**, não compra nada |
+| interseção das seis janelas | **08:49–11:50 UTC** |
+| perda média | 421 min/dia (29,3%) |
+| calendário à cobertura atual | **5,9 meses** (era 10,9 a 37%) |
+| curvatura | **côncava**; 50% de cobertura rende 58% da taxa |
+| Wake on RTC | alavanca conhecida, **não acionada** |
+| primeira cópia de backup | 2026-09-28T13:52Z, 14 arquivos, 12,6 MB |
+| instrumentos | `calendario.py` 14/14, `backup.py` 20/20 |

@@ -55,3 +55,13 @@ venv/
 *.pem
 credenciais*.json
 config_local.py
+
+# ====================================================================
+# Status do backup - estado local de maquina, nao codigo
+#
+# Ele diz QUANDO esta maquina copiou por ultimo. Versionar isso
+# faria o repositorio afirmar que uma copia existe onde ela nao
+# existe. O destino carrega a propria copia do status.
+# ====================================================================
+backup_status.json
+backup.log

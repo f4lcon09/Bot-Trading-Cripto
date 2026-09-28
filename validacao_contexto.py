@@ -241,6 +241,34 @@ def main(argv):
             reprovados += 1
     print("-" * 78)
     print(f"{len(arquivos) - reprovados}/{len(arquivos)} aprovados")
+
+    # ----------------------------------------------------------------
+    # FRESCOR DO BACKUP
+    #
+    # O porteiro que ja recusa dado sujo passa a recusar dado SEM COPIA.
+    # Nao e um segundo instrumento: e o mesmo, porque um verificador de
+    # backup separado pode emudecer sozinho e ninguem nota - exatamente
+    # o defeito que ele existiria para detectar.
+    #
+    # `dados_execucao/` nao se reproduz de fonte nenhuma. Sete dias de
+    # CSV impecavel num disco sem copia nao e dado valido: e dado a uma
+    # falha de hardware de deixar de existir.
+    # ----------------------------------------------------------------
+    print()
+    try:
+        import backup
+        _, msg = backup.verificar_frescor()
+        print(f"BACKUP: em dia - {msg}")
+    except ImportError as e:
+        print(f"BACKUP: nao foi possivel verificar ({e}).")
+        reprovados += 1
+    except Exception as e:  # noqa: BLE001  (BackupVencido e afins)
+        print(f"BACKUP REPROVADO: {e}")
+        print("  Rode:  python backup.py")
+        print("  Os CSVs podem estar impecaveis e ainda assim existir em")
+        print("  um disco so. Isto conta como reprovacao.")
+        reprovados += 1
+
     return 1 if reprovados else 0
 
 

@@ -70,6 +70,56 @@ ele só dispara com `ExitCode != 0`, e um encerramento limpo — fim de sessão,
 Ctrl+C — não conta como falha. A proteção contra instância dupla está no
 próprio Python, com trava de arquivo.
 
+#### `0x800710E0` no "Último resultado" NÃO é falha
+
+O Agendador mostra **"O operador ou administrador recusou o pedido"**
+(`0x800710E0`) como último resultado da tarefa em operação normal. É a
+repetição de 10 minutos disparando e sendo recusada porque já existe uma
+instância — o `IgnoreNew` fazendo exatamente o que foi pedido.
+
+Está escrito aqui porque é uma mensagem que **parece falha e descreve o
+funcionamento correto**, e alguém gastaria uma tarde depurando o
+comportamento certo.
+
+#### O poller pede para a máquina não dormir, e não pode fazer mais que isso
+
+`coletor_contexto.impedir_suspensao()` chama `SetThreadExecutionState`
+com `ES_CONTINUOUS | ES_SYSTEM_REQUIRED` na subida e registra no
+`poller.log` se o pedido foi aceito — recusa em silêncio é
+indistinguível de sucesso (invariante 11). Não usa
+`ES_DISPLAY_REQUIRED`: a tela pode apagar. Não impede suspensão manual.
+
+**Isso cobre suspensão por ociosidade e nada além.** Máquina desligada
+não executa tarefa agendada, com conta nenhuma — trocar a tarefa para
+`SYSTEM` não compra nada contra desligamento, e custa privilégio e
+revalidação de caminhos. Cobertura 24 h neste desenho depende de a
+máquina ficar ligada; a saída real é hospedar o poller fora dela.
+
+### Backup — o único ativo que não volta
+
+```bash
+set SNIPER_BACKUP_DIR=C:\Users\User\OneDrive\SniperV2_backup
+python backup.py              # cópia aditiva
+python backup.py --verificar  # só confere o frescor
+```
+
+Os museus voltam com dois comandos. **`dados_execucao/` não volta com
+nenhum** — a Binance retém `openInterestHist` por 1 mês, a Hyperliquid só
+expõe o snapshot atual. Se o disco morrer, esses dados deixam de existir.
+
+- **Aditivo, nunca espelho.** Arquivo removido na origem permanece no
+  destino. Espelho propaga exclusão, e numa série que só cresce isso é
+  uma forma de perder tudo com um comando.
+- **Recusa destino que não protege**: inexistente, dentro da origem, ou
+  no mesmo volume — este último *exceto* sob raiz sincronizada declarada
+  pelo sistema (`%OneDrive%`). A permissão é por variável de ambiente,
+  nunca por nome de pasta: uma pasta batizada "OneDrive" que ninguém
+  sincroniza não replica nada.
+- **Falha ruidosa (invariante 11).** O poller copia uma vez por dia e
+  grita no log se falhar — sem morrer, porque coleta vale mais que
+  cópia. E `validacao_contexto.py` **reprova** se a última cópia passar
+  de 24 h. CSV impecável num disco só não é dado válido.
+
 ### Museu e análise
 
 ```bash
@@ -93,6 +143,8 @@ python teste_detectores.py      # Gate 1b
 python invariante10.py          # autoteste dos guardas estatísticos
 python poder.py --autoteste     # autoteste do cálculo de poder
 python correlacao_controles.py --autoteste   # autoteste da correlação
+python calendario.py --autoteste             # autoteste do calendário
+python backup.py --autoteste                 # autoteste do backup
 python fisica_v2.py             # autoteste do dimensionamento
 ```
 
@@ -109,6 +161,8 @@ python fisica_v2.py             # autoteste do dimensionamento
 | `invariante10.py` | guardas estatísticos executáveis |
 | `poder.py` | efeito detectável; recusa calcular sem pressuposto declarado |
 | `correlacao_controles.py` | correlação entre os esquemas de controle, medida no museu |
+| `calendario.py` | dias corridos para N dias qualificados; a relação não é linear |
+| `backup.py` | cópia aditiva de `dados_execucao/`, com falha ruidosa |
 | `minerador_binance.py` | museu de futures e spot, via ZIP mensal |
 | `minerador_hl.py` | acúmulo prospectivo da Hyperliquid |
 | `coletor_contexto.py` | poll de OI/funding/mark, 1×/minuto |

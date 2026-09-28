@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+"""
+BACKUP.PY - copia dados_execucao para fora deste disco, e GRITA quando para.
+
+  python backup.py                 # copia e atualiza o status
+  python backup.py --verificar     # so confere o frescor da ultima copia
+  python backup.py --autoteste     # prova que ele consegue reprovar
+
+Destino pela variavel de ambiente SNIPER_BACKUP_DIR. Sem default no
+fonte: um default apontando para dentro desta maquina seria um backup
+que nao e backup, e pior, pareceria um.
+
+  set SNIPER_BACKUP_DIR=C:\\Users\\User\\OneDrive\\SniperV2_backup
+
+--------------------------------------------------------------------
+POR QUE ESTE ARQUIVO E O ITEM MAIS CARO DA FILA
+--------------------------------------------------------------------
+`dados_execucao/` tem openInterest, funding e mark price minuto a
+minuto. Ao contrario do museu, isto NAO e reproduzivel: a Binance
+retem openInterestHist por 1 mes a 5 minutos, a Hyperliquid so expoe o
+snapshot atual. Se o disco morrer, estes dados nao existem em lugar
+nenhum do mundo - nem na Binance, nem na Hyperliquid, nem em backup de
+terceiro.
+
+O museu volta com dois comandos. Isto nao volta com nenhum.
+
+--------------------------------------------------------------------
+INVARIANTE 11: UM BACKUP QUE PARA EM SILENCIO E PIOR QUE NENHUM
+--------------------------------------------------------------------
+Nenhum backup: o risco fica visivel e incomoda.
+Backup que parou: a sensacao de copia fica, o risco volta, e ninguem sabe.
+
+E o mesmo defeito do arquivo de falhas que so gravava em saida limpa, e
+do detector de lacuna que exigia cabecalho identico: o instrumento
+devolve "nada a relatar", que e exatamente o que devolveria funcionando.
+
+Por isso:
+  - toda copia grava `backup_status.json` com carimbo, contagem e bytes
+  - `verificar_frescor()` REPROVA se a ultima copia passou de 24 h
+  - `validacao_contexto.py` chama essa verificacao, e o poller a registra
+    no log na subida
+
+O detector de silencio do backup e o porteiro que ja reprova dado sujo,
+nao um segundo instrumento que tambem pode emudecer.
+
+--------------------------------------------------------------------
+NUNCA APAGA NO DESTINO
+--------------------------------------------------------------------
+A copia e ADITIVA. Arquivo que existe no destino e nao existe mais na
+origem FICA. Espelho propaga exclusao, e numa serie que so cresce e nao
+se recupera o destino nunca deve perder arquivo - nem quando a origem
+perde.
+"""
+import hashlib
+import json
+import os
+import shutil
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+
+from config import DIR_EXECUCAO
+
+NOME_STATUS = "backup_status.json"
+
+# Arquivos de RUNTIME, nao de dado. A lista e minima de proposito:
+# tudo que ela exclui e coisa que este projeto decide NAO proteger, e
+# uma lista generosa esconderia dado atras de conveniencia.
+#
+#   poller.lock - byte travado com msvcrt pelo processo vivo. Nao da
+#     para copiar enquanto o poller roda, e uma trava no destino seria
+#     ruido: a trava e do processo, nao da serie.
+#
+# poller.log NAO entra aqui. O CSV diz QUAIS minutos faltaram e o log
+# diz POR QUE; perder o log e perder metade do registro.
+EXCLUIDOS = ("poller.lock",)
+HORAS_MAX = 24
+
+
+class BackupInvalido(Exception):
+    """Destino ausente, no mesmo disco, ou dentro do proprio projeto."""
+
+
+class BackupVencido(Exception):
+    """A ultima copia bem-sucedida e velha demais para contar como copia."""
+
+
+def agora():
+    return datetime.now(timezone.utc)
+
+
+def iso(dt):
+    return dt.replace(microsecond=0).isoformat()
+
+
+def caminho_status():
+    """No projeto, FORA de dados_execucao.
+
+    O Gate 1b tira impressao digital de DIR_EXECUCAO e reprova se algo
+    ali muda durante o teste. Um status escrito dentro dele faria o
+    proprio backup reprovar o gate de isolamento.
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(DIR_EXECUCAO)),
+                        NOME_STATUS)
+
+
+def destino():
+    d = os.environ.get("SNIPER_BACKUP_DIR", "").strip()
+    if not d:
+        raise BackupInvalido(
+            "SNIPER_BACKUP_DIR nao definida. Sem default no fonte: um "
+            "default apontando para dentro desta maquina seria um backup "
+            "que nao e backup, e pareceria um.")
+    return d
+
+
+# Raizes de sincronizacao declaradas PELO PROPRIO SISTEMA, por variavel
+# de ambiente. Nao sao adivinhadas por nome de pasta: uma pasta chamada
+# "OneDrive" que ninguem sincroniza nao replica nada, e o teste de nome
+# aceitaria justamente o caso que nao protege.
+VARS_NUVEM = ("OneDrive", "OneDriveConsumer", "OneDriveCommercial")
+
+
+def raiz_nuvem(caminho):
+    """(nome_da_var, raiz) se `caminho` esta sob raiz sincronizada, ou None."""
+    c = os.path.abspath(caminho).rstrip(os.sep)
+    for v in VARS_NUVEM:
+        raiz = os.environ.get(v, "").strip().rstrip(os.sep)
+        if not raiz:
+            continue
+        raiz = os.path.abspath(raiz)
+        if c == raiz or c.startswith(raiz + os.sep):
+            return v, raiz
+    return None
+
+
+def conferir_destino(d, origem=None):
+    """
+    Recusa destino que nao protege contra morte do disco.
+
+    O risco declarado e o disco morrer. Uma pasta no mesmo volume nao
+    protege contra isso - EXCETO se ela for replicada para fora da
+    maquina, que e o caso de uma raiz sincronizada.
+
+    A permissao nao e por nome de pasta. E pela variavel de ambiente que
+    o proprio sistema define ao instalar o cliente de sincronizacao: uma
+    pasta batizada "OneDrive" que ninguem sincroniza nao replica nada, e
+    aceitar por nome deixaria passar exatamente o caso que nao protege.
+    """
+    origem = os.path.abspath(origem or DIR_EXECUCAO)
+    d_abs = os.path.abspath(d)
+    if not os.path.isdir(d_abs):
+        raise BackupInvalido(
+            f"destino {d_abs!r} nao existe. Crie a pasta primeiro - "
+            f"criar sozinho esconderia caminho digitado errado.")
+    if d_abs == origem or d_abs.startswith(origem + os.sep):
+        raise BackupInvalido(
+            f"destino {d_abs!r} esta DENTRO da origem. Isso nao e copia.")
+    if os.path.splitdrive(d_abs)[0].upper() == \
+            os.path.splitdrive(origem)[0].upper():
+        nuvem = raiz_nuvem(d_abs)
+        if nuvem is None:
+            raise BackupInvalido(
+                f"destino esta no mesmo volume da origem "
+                f"({os.path.splitdrive(d_abs)[0]}) e nao esta sob raiz "
+                f"sincronizada. Backup no mesmo disco nao protege contra o "
+                f"risco declarado, que e o disco morrer. Use pasta "
+                f"sincronizada com a nuvem ({', '.join(VARS_NUVEM)}) ou "
+                f"outro volume.")
+    return d_abs
+
+
+def justificativa_destino(d, origem=None):
+    """Por que este destino conta como copia. Vai para o status."""
+    d_abs = os.path.abspath(d)
+    origem = os.path.abspath(origem or DIR_EXECUCAO)
+    if os.path.splitdrive(d_abs)[0].upper() != \
+            os.path.splitdrive(origem)[0].upper():
+        return f"volume distinto ({os.path.splitdrive(d_abs)[0]})"
+    nuvem = raiz_nuvem(d_abs)
+    if nuvem:
+        return f"mesmo volume, sob raiz sincronizada {nuvem[0]}={nuvem[1]}"
+    return "sem justificativa"
+
+
+def _digest(caminho, blocos=1 << 20):
+    h = hashlib.sha256()
+    with open(caminho, "rb") as f:
+        for b in iter(lambda: f.read(blocos), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def copiar(origem=None, dest=None, verificar_digest=True):
+    """
+    Copia aditiva de origem -> dest/<basename(origem)>.
+
+    Devolve o dicionario de status. Levanta em qualquer erro: copia que
+    falha em silencio e o defeito que este arquivo existe para nao ter.
+    """
+    origem = os.path.abspath(origem or DIR_EXECUCAO)
+    if not os.path.isdir(origem):
+        raise BackupInvalido(f"origem {origem!r} nao existe")
+    raiz = conferir_destino(dest or destino(), origem)
+    alvo = os.path.join(raiz, os.path.basename(origem))
+    os.makedirs(alvo, exist_ok=True)
+
+    copiados, iguais, bytes_copiados, erros = 0, 0, 0, []
+    for nome in sorted(os.listdir(origem)):
+        o = os.path.join(origem, nome)
+        if not os.path.isfile(o) or nome in EXCLUIDOS:
+            continue
+        d = os.path.join(alvo, nome)
+        try:
+            st_o = os.stat(o)
+            precisa = True
+            if os.path.exists(d):
+                st_d = os.stat(d)
+                precisa = (st_o.st_size != st_d.st_size
+                           or st_o.st_mtime_ns > st_d.st_mtime_ns)
+            if not precisa:
+                iguais += 1
+                continue
+            shutil.copy2(o, d)
+            if verificar_digest and _digest(o) != _digest(d):
+                raise OSError("digest divergente apos a copia")
+            copiados += 1
+            bytes_copiados += st_o.st_size
+        except OSError as e:
+            erros.append(f"{nome}: {type(e).__name__}: {e}")
+
+    # Contagem no DESTINO, nao na origem: e ele que tem de estar certo.
+    #
+    # NOME_STATUS e excluido: ele e escrito por este proprio arquivo e
+    # nao e dado coletado. Contado junto, o numero inflava em 1 a partir
+    # da SEGUNDA execucao - metrica que muda de definicao sozinha entre
+    # a primeira e a segunda rodada. O autoteste pegou isso.
+    no_destino = [n for n in os.listdir(alvo)
+                  if os.path.isfile(os.path.join(alvo, n))
+                  and n != NOME_STATUS and n not in EXCLUIDOS]
+    faltando = sorted(
+        n for n in os.listdir(origem)
+        if os.path.isfile(os.path.join(origem, n))
+        and n not in EXCLUIDOS and n not in no_destino)
+
+    status = {
+        "quando_utc": iso(agora()),
+        "origem": origem,
+        "destino": alvo,
+        "por_que_conta_como_copia": justificativa_destino(raiz, origem),
+        "excluidos_por_serem_runtime": list(EXCLUIDOS),
+        "arquivos_no_destino": len(no_destino),
+        "copiados": copiados,
+        "inalterados": iguais,
+        "bytes_copiados": bytes_copiados,
+        "faltando_no_destino": faltando,
+        "erros": erros,
+        "ok": not erros and not faltando,
+    }
+    with open(caminho_status(), "w", encoding="utf-8") as f:
+        json.dump(status, f, ensure_ascii=False, indent=2)
+    # Uma segunda copia do status VAI para o destino, para que a pasta de
+    # backup diga por si mesma quando foi atualizada - sem depender de
+    # um arquivo que mora no disco que pode morrer.
+    try:
+        with open(os.path.join(alvo, NOME_STATUS), "w",
+                  encoding="utf-8") as f:
+            json.dump(status, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        status["erros"].append(f"status no destino: {e}")
+        status["ok"] = False
+
+    if not status["ok"]:
+        raise BackupInvalido(
+            f"copia incompleta: {len(erros)} erro(s), "
+            f"{len(faltando)} arquivo(s) faltando no destino. "
+            f"{'; '.join(erros[:3])}")
+    return status
+
+
+def ler_status():
+    try:
+        with open(caminho_status(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def verificar_frescor(horas_max=HORAS_MAX):
+    """
+    (ok, mensagem). Levanta BackupVencido se passou do prazo.
+
+    Chamada pelo `validacao_contexto.py` e registrada pelo poller na
+    subida. Ausencia de status conta como VENCIDO, nunca como zero:
+    nunca ter copiado e o pior caso, nao o caso neutro.
+    """
+    s = ler_status()
+    if s is None:
+        raise BackupVencido(
+            f"nao existe {NOME_STATUS}. Nenhuma copia registrada - e "
+            f"ausencia de medida nao e medida de zero (invariante 11).")
+    if not s.get("ok"):
+        raise BackupVencido(
+            f"a ultima copia registrada FALHOU em {s.get('quando_utc')}: "
+            f"{'; '.join(s.get('erros') or ['motivo nao registrado'])}")
+    try:
+        quando = datetime.fromisoformat(s["quando_utc"])
+    except (KeyError, ValueError) as e:
+        raise BackupVencido(f"carimbo ilegivel no status: {e}") from e
+    idade = agora() - quando
+    if idade > timedelta(hours=horas_max):
+        raise BackupVencido(
+            f"ultima copia em {s['quando_utc']} - "
+            f"{idade.total_seconds() / 3600:.1f} h atras, limite "
+            f"{horas_max} h. Os dados de hoje nao tem copia.")
+    return True, (f"ultima copia {idade.total_seconds() / 3600:.1f} h "
+                  f"atras, {s['arquivos_no_destino']} arquivos em "
+                  f"{s['destino']}")
+
+
+# --------------------------------------------------------------------
+# AUTOTESTE
+# --------------------------------------------------------------------
+def _ok(cond, rotulo, detalhe=""):
+    print("  %s %s%s" % ("OK   " if cond else "FALHA", rotulo,
+                         ("   " + detalhe) if detalhe else ""))
+    return bool(cond)
+
+
+def _recusa(fn, exc, rotulo):
+    try:
+        fn()
+    except exc as e:
+        return _ok(True, rotulo, "-> " + type(e).__name__)
+    except Exception as e:  # noqa: BLE001
+        return _ok(False, rotulo, "-> excecao errada: " + type(e).__name__)
+    return _ok(False, rotulo, "-> NAO recusou")
+
+
+def autoteste():
+    import tempfile
+    r = []
+    base = tempfile.mkdtemp(prefix="backup_teste_")
+    origem = os.path.join(base, "dados")
+    os.makedirs(origem)
+    for i in range(3):
+        with open(os.path.join(origem, "arq%d.csv" % i), "w") as f:
+            f.write("ts,v\n1,%d\n" % i)
+
+    print(chr(10) + "1. RECUSA DESTINO QUE NAO E BACKUP")
+    r.append(_recusa(lambda: conferir_destino(os.path.join(base, "nao_existe"),
+                                              origem),
+                     BackupInvalido, "destino inexistente"))
+    r.append(_recusa(lambda: conferir_destino(origem, origem),
+                     BackupInvalido, "destino igual a origem"))
+    r.append(_recusa(lambda: conferir_destino(os.path.join(origem, "sub"),
+                                              origem),
+                     BackupInvalido, "destino dentro da origem"))
+    r.append(_recusa(lambda: conferir_destino(base, origem),
+                     BackupInvalido, "destino no mesmo volume"))
+    # a permissao e por variavel de ambiente, nunca por nome de pasta
+    falsa = os.path.join(base, "OneDrive")
+    os.makedirs(falsa, exist_ok=True)
+    r.append(_recusa(lambda: conferir_destino(falsa, origem),
+                     BackupInvalido,
+                     "pasta CHAMADA OneDrive sem sincronizacao"))
+    os.environ["OneDrive"] = falsa
+    try:
+        r.append(_ok(conferir_destino(falsa, origem) is not None,
+                     "a mesma pasta passa quando o sistema a declara",
+                     "OneDrive=<raiz>"))
+        r.append(_ok("raiz sincronizada" in
+                     justificativa_destino(falsa, origem),
+                     "o status registra POR QUE o destino conta"))
+    finally:
+        os.environ.pop("OneDrive", None)
+    os.environ.pop("SNIPER_BACKUP_DIR", None)
+    r.append(_recusa(destino, BackupInvalido, "sem SNIPER_BACKUP_DIR"))
+
+    print(chr(10) + "2. FRESCOR: AUSENCIA CONTA COMO VENCIDO")
+    real = caminho_status()
+    guardado = None
+    if os.path.exists(real):
+        with open(real, encoding="utf-8") as f:
+            guardado = f.read()
+        os.remove(real)
+    try:
+        r.append(_recusa(verificar_frescor, BackupVencido,
+                         "sem status nenhum"))
+        for rotulo, dados in (
+                ("copia marcada como falha",
+                 {"quando_utc": iso(agora()), "ok": False,
+                  "erros": ["disco cheio"]}),
+                ("copia de 48 h atras",
+                 {"quando_utc": iso(agora() - timedelta(hours=48)),
+                  "ok": True, "arquivos_no_destino": 3, "destino": "x"}),
+                ("carimbo ilegivel",
+                 {"quando_utc": "ontem", "ok": True})):
+            with open(real, "w", encoding="utf-8") as f:
+                json.dump(dados, f)
+            r.append(_recusa(verificar_frescor, BackupVencido, rotulo))
+        with open(real, "w", encoding="utf-8") as f:
+            json.dump({"quando_utc": iso(agora()), "ok": True,
+                       "arquivos_no_destino": 3, "destino": "x"}, f)
+        ok, msg = verificar_frescor()
+        r.append(_ok(ok, "copia recente e aceita", msg))
+    finally:
+        if guardado is not None:
+            with open(real, "w", encoding="utf-8") as f:
+                f.write(guardado)
+        elif os.path.exists(real):
+            os.remove(real)
+
+    print(chr(10) + "3. A COPIA COPIA, E NAO APAGA NO DESTINO")
+    # destino noutro "volume" nao da para simular em teste, entao aqui a
+    # conferencia de volume e desligada de proposito e testada acima.
+    dest = os.path.join(base, "espelho")
+    os.makedirs(dest)
+    alvo = os.path.join(dest, "dados")
+
+    def copia():
+        return copiar(origem, dest, verificar_digest=True)
+
+    _orig = globals()["conferir_destino"]
+    globals()["conferir_destino"] = lambda d, o=None: os.path.abspath(d)
+    try:
+        s1 = copia()
+        r.append(_ok(s1["copiados"] == 3, "copiou os tres arquivos",
+                     "copiados=%d" % s1["copiados"]))
+        r.append(_ok(s1["ok"], "status ok"))
+        s2 = copia()
+        r.append(_ok(s2["copiados"] == 0 and s2["inalterados"] == 3,
+                     "segunda passada nao recopia",
+                     "copiados=%d inalterados=%d"
+                     % (s2["copiados"], s2["inalterados"])))
+        os.remove(os.path.join(origem, "arq1.csv"))
+        s3 = copia()
+        sobrou = os.path.exists(os.path.join(alvo, "arq1.csv"))
+        r.append(_ok(sobrou, "arquivo apagado na ORIGEM permanece no destino",
+                     "aditivo, nao espelho"))
+        r.append(_ok(s3["arquivos_no_destino"] == 3,
+                     "destino mantem os tres",
+                     "no destino=%d" % s3["arquivos_no_destino"]))
+        with open(os.path.join(origem, "arq0.csv"), "a") as f:
+            f.write("2,99\n")
+        s4 = copia()
+        r.append(_ok(s4["copiados"] == 1, "arquivo que cresceu e recopiado"))
+        r.append(_ok(os.path.exists(os.path.join(alvo, NOME_STATUS)),
+                     "o destino carrega o proprio status"))
+    finally:
+        globals()["conferir_destino"] = _orig
+        shutil.rmtree(base, ignore_errors=True)
+
+    print(chr(10) + "=" * 62)
+    print("%d/%d verificacoes passaram" % (sum(r), len(r)))
+    print("=" * 62)
+    return 0 if all(r) else 1
+
+
+def main(argv):
+    if "--autoteste" in argv:
+        return autoteste()
+    if "--verificar" in argv:
+        try:
+            _, msg = verificar_frescor()
+        except BackupVencido as e:
+            print("BACKUP VENCIDO: %s" % e)
+            return 1
+        print("backup em dia: %s" % msg)
+        return 0
+    t0 = time.time()
+    try:
+        s = copiar()
+    except (BackupInvalido, BackupVencido) as e:
+        print("BACKUP FALHOU: %s" % e)
+        return 1
+    print("backup ok em %.1f s" % (time.time() - t0))
+    print("  destino            %s" % s["destino"])
+    print("  arquivos           %d" % s["arquivos_no_destino"])
+    print("  copiados agora     %d  (%.1f KiB)"
+          % (s["copiados"], s["bytes_copiados"] / 1024.0))
+    print("  inalterados        %d" % s["inalterados"])
+    print("  status             %s" % caminho_status())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
