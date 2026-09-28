@@ -1,0 +1,65 @@
+{
+  "rotulo": "2026-09-28",
+  "congelado_em_utc": "2026-09-28T15:24:09+00:00",
+  "origem": "C:\\SniperV2\\dados_execucao",
+  "natureza": "INSTANTANEO DATADO - NAO E MANTIDO E NAO E BACKUP VIVO",
+  "para_que_serve": "referencia de integridade: a serie e append-only, entao o prefixo de cada arquivo nesta data nunca deveria mudar. `python backup.py --comparar <este arquivo>` verifica isso.",
+  "arquivos": {
+    "contexto_2026-09-22.csv": {
+      "bytes": 47573,
+      "sha256_prefixo": "ed8f2fa93d46c8576757804a23fb4ad5083d6c274e86a06c888aa8816f737a3b"
+    },
+    "contexto_2026-09-23.csv": {
+      "bytes": 2013201,
+      "sha256_prefixo": "2073b343bb06d1f83e1d39c2fe1a02c2becc02f7365d4d538d79c26072eddee9"
+    },
+    "contexto_2026-09-24.csv": {
+      "bytes": 2122825,
+      "sha256_prefixo": "81c7362a7904d6c297a6dde17573e0e5ab2bdcf807f87357e33101dac76dac45"
+    },
+    "contexto_2026-09-25.csv": {
+      "bytes": 2555310,
+      "sha256_prefixo": "316e7a8191a8f8b0140b4db7cedf0d62b8aa18f26dc5db4227d1df39421f831f"
+    },
+    "contexto_2026-09-26.csv": {
+      "bytes": 2258967,
+      "sha256_prefixo": "7138db6326695af317048b82cc4573a28b384a67a65b09b1f69c99ebfdc07e98"
+    },
+    "contexto_2026-09-27.csv": {
+      "bytes": 2652296,
+      "sha256_prefixo": "704c7e2b89056eca2d7846703d709d93be1558d86563f0361412ca53ad8ca2b1"
+    },
+    "contexto_2026-09-28.csv": {
+      "bytes": 1205874,
+      "sha256_prefixo": "a727f343184644ee2f4e03aafcf853247d4d633ec0d5595ac800906777e2ba96"
+    },
+    "contexto_falhas_2026-09-23.csv": {
+      "bytes": 886,
+      "sha256_prefixo": "f969b8faf112ceee96bca4cac2dbfd94fd788312678620de01c5cdc704e4f7d5"
+    },
+    "contexto_falhas_2026-09-24.csv": {
+      "bytes": 585,
+      "sha256_prefixo": "82c66c0fd21a8e160bcf85ce19d20ef2ca73e18074a913d2e6ad87459768b5ef"
+    },
+    "contexto_falhas_2026-09-25.csv": {
+      "bytes": 229,
+      "sha256_prefixo": "f5e39105d03973c5fadcb5f53f33c769362b4108e0fe0abbf23756749580e7ae"
+    },
+    "contexto_falhas_2026-09-26.csv": {
+      "bytes": 143,
+      "sha256_prefixo": "70e6c2ad91bda31c2ef9cba076dbb71b96fbe41619823fb7b93b7f5309e79265"
+    },
+    "contexto_falhas_2026-09-27.csv": {
+      "bytes": 143,
+      "sha256_prefixo": "3744dd7a0dcc3cdb1f2d7723c194218a9ec1f54a4dc6a361592f05ca2dbd6d3a"
+    },
+    "contexto_falhas_2026-09-28.csv": {
+      "bytes": 230,
+      "sha256_prefixo": "980a8bf76806f2656301914154f5117adcd16d0fc19fc21e63d2440eb8526846"
+    },
+    "poller.log": {
+      "bytes": 5132,
+      "sha256_prefixo": "0932a0d723c8dad3842141933b9f9f2322c4b91995ec0aa75fd2facbe2136cb4"
+    }
+  }
+}

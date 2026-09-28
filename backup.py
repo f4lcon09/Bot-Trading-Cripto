@@ -535,6 +535,109 @@ def verificar_frescor(horas_max=HORAS_MAX, exigir_replicacao=True):
 # --------------------------------------------------------------------
 # AUTOTESTE
 # --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# INSTANTANEO - referencia datada de integridade
+#
+# A serie de contexto e APPEND-ONLY: um dia ja escrito nunca deveria
+# mudar. Um arquivo que cresce e normal; um byte que muda no meio nao e.
+#
+# Comparar o hash do arquivo INTEIRO nao serve: ele muda a cada linha
+# nova, e o detector gritaria todo minuto. O que se congela e o hash dos
+# primeiros N bytes - o prefixo existente na data do instantaneo. Mais
+# tarde, re-hashear os mesmos N bytes responde a pergunta certa:
+#
+#   o passado continua igual, ou alguem reescreveu historia?
+#
+# Isto sobrevive aos dois destinos. Mesmo que as duas copias morram, o
+# manifesto no git prova o que os arquivos eram naquela data.
+# --------------------------------------------------------------------
+def _sha_prefixo(caminho, n, blocos=1 << 20):
+    h = hashlib.sha256()
+    lidos = 0
+    with open(caminho, "rb") as f:
+        while lidos < n:
+            b = f.read(min(blocos, n - lidos))
+            if not b:
+                break
+            h.update(b)
+            lidos += len(b)
+    if lidos != n:
+        raise OSError(f"esperava {n} bytes, li {lidos}")
+    return h.hexdigest()
+
+
+def manifesto(origem=None):
+    """{arquivo: {bytes, sha256_prefixo}} do estado atual."""
+    origem = os.path.abspath(origem or DIR_EXECUCAO)
+    fora = {}
+    for nome in sorted(os.listdir(origem)):
+        cam = os.path.join(origem, nome)
+        if not os.path.isfile(cam) or nome in EXCLUIDOS or nome == NOME_STATUS:
+            continue
+        n = os.path.getsize(cam)
+        fora[nome] = {"bytes": n, "sha256_prefixo": _sha_prefixo(cam, n)}
+    return fora
+
+
+def congelar_instantaneo(rotulo, origem=None, alem_de=()):
+    """Grava o manifesto datado. Devolve o dicionario."""
+    inst = {
+        "rotulo": rotulo,
+        "congelado_em_utc": iso(agora()),
+        "origem": os.path.abspath(origem or DIR_EXECUCAO),
+        "natureza": "INSTANTANEO DATADO - NAO E MANTIDO E NAO E BACKUP VIVO",
+        "para_que_serve": (
+            "referencia de integridade: a serie e append-only, entao o "
+            "prefixo de cada arquivo nesta data nunca deveria mudar. "
+            "`python backup.py --comparar <este arquivo>` verifica isso."),
+        "arquivos": manifesto(origem),
+    }
+    destinos = [os.path.join(os.path.dirname(caminho_status()),
+                             f"instantaneo_{rotulo}.json")] + list(alem_de)
+    escritos = []
+    for d in destinos:
+        try:
+            with open(d, "w", encoding="utf-8") as f:
+                json.dump(inst, f, ensure_ascii=False, indent=2)
+            escritos.append(d)
+        except OSError as e:
+            inst.setdefault("erros", []).append(f"{d}: {e}")
+    inst["_escritos"] = escritos
+    return inst
+
+
+def comparar_instantaneo(caminho, origem=None):
+    """
+    Divergencias entre um instantaneo e o estado atual.
+
+    Devolve [(nome, veredito, detalhe)]. Crescer e ESPERADO e nao entra
+    na lista; o que entra e o que contradiz append-only.
+    """
+    with open(caminho, encoding="utf-8") as f:
+        inst = json.load(f)
+    origem = os.path.abspath(origem or inst.get("origem") or DIR_EXECUCAO)
+    fora = []
+    for nome, e in sorted(inst.get("arquivos", {}).items()):
+        cam = os.path.join(origem, nome)
+        if not os.path.isfile(cam):
+            fora.append((nome, "REMOVIDO", "existia no instantaneo"))
+            continue
+        atual = os.path.getsize(cam)
+        if atual < e["bytes"]:
+            fora.append((nome, "ENCOLHEU",
+                         f"{e['bytes']} -> {atual} bytes"))
+            continue
+        try:
+            h = _sha_prefixo(cam, e["bytes"])
+        except OSError as err:
+            fora.append((nome, "ILEGIVEL", str(err)))
+            continue
+        if h != e["sha256_prefixo"]:
+            fora.append((nome, "HISTORIA ALTERADA",
+                         f"os primeiros {e['bytes']} bytes mudaram"))
+    return fora
+
+
 def _ok(cond, rotulo, detalhe=""):
     print("  %s %s%s" % ("OK   " if cond else "FALHA", rotulo,
                          ("   " + detalhe) if detalhe else ""))
@@ -769,6 +872,64 @@ def autoteste():
         _STATUS_ALT = None
         shutil.rmtree(base, ignore_errors=True)
 
+    print(chr(10) + "3b. INSTANTANEO: APPEND E OK, REESCRITA NAO")
+    inst_dir = os.path.join(base, "inst")
+    os.makedirs(inst_dir, exist_ok=True)
+    NL = bytes([10])
+    for nome, linhas in (("a.csv", [b"ts,v", b"1,1", b"2,2"]),
+                         ("b.csv", [b"ts,v", b"9,9"])):
+        with open(os.path.join(inst_dir, nome), "wb") as f:
+            f.write(NL.join(linhas) + NL)
+    man = manifesto(inst_dir)
+    r.append(_ok(set(man) == {"a.csv", "b.csv"}, "manifesto lista os arquivos"))
+    cam_inst = os.path.join(base, "instantaneo_teste.json")
+    with open(cam_inst, "w", encoding="utf-8") as f:
+        json.dump({"origem": inst_dir, "arquivos": man}, f)
+
+    r.append(_ok(comparar_instantaneo(cam_inst) == [],
+                 "sem mudanca, nenhuma divergencia"))
+    with open(os.path.join(inst_dir, "a.csv"), "ab") as f:
+        f.write(b"3,3" + NL)
+    r.append(_ok(comparar_instantaneo(cam_inst) == [],
+                 "APPEND nao e divergencia", "a serie so cresce"))
+    with open(os.path.join(inst_dir, "c.csv"), "wb") as f:
+        f.write(b"ts,v" + NL)
+    r.append(_ok(comparar_instantaneo(cam_inst) == [],
+                 "arquivo NOVO nao e divergencia"))
+
+    # reescrita de historia: um byte no meio do prefixo congelado
+    cam_b = os.path.join(inst_dir, "b.csv")
+    dados = bytearray(open(cam_b, "rb").read())
+    dados[-2:-1] = b"8"
+    with open(cam_b, "wb") as f:
+        f.write(bytes(dados))
+    d = comparar_instantaneo(cam_inst)
+    r.append(_ok([x for x in d if x[0] == "b.csv"
+                  and x[1] == "HISTORIA ALTERADA"],
+                 "byte alterado no passado e DETECTADO", str(d[:1])))
+
+    # truncar e apagar
+    with open(cam_b, "wb") as f:
+        f.write(b"ts")
+    r.append(_ok(any(x[1] == "ENCOLHEU" for x in comparar_instantaneo(cam_inst)),
+                 "truncamento e DETECTADO"))
+    os.remove(cam_b)
+    r.append(_ok(any(x[1] == "REMOVIDO" for x in comparar_instantaneo(cam_inst)),
+                 "remocao e DETECTADA"))
+
+    # o hash do arquivo INTEIRO gritaria a cada append; o do prefixo nao
+    inteiro_antes = _digest(os.path.join(inst_dir, "a.csv"))
+    with open(os.path.join(inst_dir, "a.csv"), "ab") as f:
+        f.write(b"4,4" + NL)
+    # A comparacao ja carrega divergencias deliberadas dos passos acima
+    # (b.csv foi apagado), entao a asserção olha SO para a.csv - senao o
+    # teste estaria medindo o resultado dos outros blocos.
+    sobre_a = [x for x in comparar_instantaneo(cam_inst) if x[0] == "a.csv"]
+    r.append(_ok(_digest(os.path.join(inst_dir, "a.csv")) != inteiro_antes
+                 and sobre_a == [],
+                 "hash do arquivo inteiro muda, o do prefixo nao",
+                 "por isso o criterio e o prefixo"))
+
     print(chr(10) + "4. ISOLAMENTO: O TESTE NAO TOCOU PRODUCAO")
     depois = (_impressao(prod_status), _impressao(prod_atestado))
     r.append(_ok(antes[0] == depois[0],
@@ -809,6 +970,44 @@ def main(argv):
         print("destino:    %s" % at["destino"])
         print("Se o destino mudar, a confirmacao tera de ser refeita.")
         return 0
+    if "--instantaneo" in argv:
+        i = argv.index("--instantaneo")
+        rotulo = argv[i + 1] if len(argv) > i + 1 else agora().strftime(
+            "%Y-%m-%d")
+        alem = []
+        try:
+            alem.append(os.path.join(
+                conferir_destino(destino()),
+                os.path.basename(os.path.abspath(DIR_EXECUCAO)),
+                "INSTANTANEO_%s.json" % rotulo))
+        except BackupInvalido:
+            pass
+        inst = congelar_instantaneo(rotulo, alem_de=alem)
+        print("instantaneo %r congelado em %s"
+              % (rotulo, inst["congelado_em_utc"]))
+        print("  arquivos  %d" % len(inst["arquivos"]))
+        for d in inst["_escritos"]:
+            print("  escrito   %s" % d)
+        print("  natureza  %s" % inst["natureza"])
+        return 0
+    if "--comparar" in argv:
+        i = argv.index("--comparar")
+        if len(argv) <= i + 1:
+            print("uso: python backup.py --comparar <instantaneo.json>")
+            return 2
+        try:
+            div = comparar_instantaneo(argv[i + 1])
+        except (OSError, ValueError) as e:
+            print("nao foi possivel comparar: %s" % e)
+            return 2
+        if not div:
+            print("nenhuma divergencia: o passado continua igual.")
+            print("(crescer e esperado e nao conta como divergencia)")
+            return 0
+        print("DIVERGENCIAS - a serie e append-only e algo contradisse isso:")
+        for nome, veredito, det in div:
+            print("  %-34s %-18s %s" % (nome, veredito, det))
+        return 1
     if "--verificar" in argv:
         try:
             _, msg = verificar_frescor()

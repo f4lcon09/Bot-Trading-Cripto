@@ -101,6 +101,8 @@ máquina ficar ligada; a saída real é hospedar o poller fora dela.
 set SNIPER_BACKUP_DIR=G:\Meu Drive\SniperV2_backup
 python backup.py              # cópia aditiva
 python backup.py --verificar  # só confere o frescor
+python backup.py --instantaneo 2026-09-28        # congela referência
+python backup.py --comparar instantaneo_X.json   # o passado mudou?
 ```
 
 O poller define essa variável no próprio `iniciar_poller.bat` — a tarefa
@@ -150,6 +152,13 @@ python backup.py --confirmar-replicacao
   Confira antes em `onedrive.com` que os arquivos estão lá. O atestado é
   gravado como **afirmação humana, não medição**, e destino novo exige
   confirmação nova.
+- **Instantâneo datado, para detectar reescrita de história.** A série é
+  append-only: um dia já escrito nunca deveria mudar. O manifesto guarda,
+  por arquivo, o tamanho em bytes na data e o SHA-256 **desses primeiros
+  bytes** — não do arquivo inteiro, que mudaria a cada linha nova e faria
+  o detector gritar todo minuto. Crescer não é divergência; byte alterado
+  no meio, truncamento e remoção são. Os manifestos são versionados: se
+  as duas cópias morrerem, o git ainda prova o que os arquivos eram.
 - **O atestado vence em 30 dias.** Ele resolve "ninguém verificou nunca";
   sem prazo não resolveria "alguém verificou uma vez, em março" — a
   sincronização pode parar depois da confirmação e o arquivo continuaria

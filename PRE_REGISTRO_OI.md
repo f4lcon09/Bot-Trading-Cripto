@@ -1706,3 +1706,61 @@ data, toda cópia foi disparada à mão.**
 
 O bloqueio de suspensão, esse sim, está ativo no processo de pé desde
 13:22Z.
+
+### Fechamento do Adendo 2, parte 12 — a cópia antiga vira instrumento
+
+Escrito em 2026-09-28. **Zero eventos na base.**
+
+#### 30. A cópia do OneDrive fica, e com função declarada
+
+Decisão do autor: **manter**, por dois motivos. O segundo não estava no
+desenho e é melhor que o primeiro.
+
+1. **Segundo provedor.** O destino vivo depende da conta Google; esta
+   cópia cobre perder o acesso a ela. Custa 12 MB.
+2. **Referência de integridade.** A série é **append-only** — um dia já
+   escrito nunca deveria mudar. Uma cópia congelada e datada permite
+   perguntar depois: *o passado continua igual, ou alguém reescreveu
+   história?*
+
+O risco de mantê-la era nomeado: uma pasta parada com dados de setembro
+**pode parecer cópia em março**. Isso foi resolvido fazendo a cópia
+**declarar o que é** — um `LEIA-ME.txt` dentro dela diz que é instantâneo
+datado, que não é mantido, onde fica o backup vivo, e que estar velha é
+desenho e não defeito.
+
+#### 31. O instantâneo, e por que o critério é o prefixo
+
+Comparar o hash do **arquivo inteiro** não serviria: ele muda a cada
+linha nova, e o detector gritaria todo minuto — ruído que ninguém lê, que
+é uma das formas de um instrumento morrer.
+
+O que se congela é, por arquivo, o **tamanho em bytes naquela data** e o
+**SHA-256 desses primeiros bytes**. Mais tarde, re-hashear os mesmos N
+bytes responde à pergunta certa:
+
+| evento | veredito |
+| --- | --- |
+| arquivo cresceu | **não é divergência** — a série só cresce |
+| arquivo novo apareceu | **não é divergência** |
+| byte alterado dentro do prefixo | **HISTORIA ALTERADA** |
+| arquivo truncado | **ENCOLHEU** |
+| arquivo sumiu | **REMOVIDO** |
+
+`backup.py`: **45/45**, com o bloco `3b` provando cada uma dessas cinco
+linhas, mais a que justifica o desenho — o hash do arquivo inteiro muda
+com o append e o do prefixo não.
+
+**O manifesto é versionado no git.** Se as duas cópias morrerem, o
+repositório ainda prova o que os arquivos eram em 2026-09-28. É a única
+peça desta cadeia que não depende de disco nem de provedor.
+
+#### Estado nesta data
+
+| item | estado |
+| --- | --- |
+| backup vivo | `G:\Meu Drive\SniperV2_backup`, atestado, 29 dias |
+| instantâneo datado | OneDrive, com `LEIA-ME.txt` declarando a natureza |
+| manifesto | `instantaneo_2026-09-28.json`, 14 arquivos, versionado |
+| comparação hoje | **nenhuma divergência** |
+| porteiro | aprova, saída 0 |
