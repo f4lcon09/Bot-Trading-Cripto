@@ -1410,3 +1410,136 @@ os junte precisa dizer que os juntou.
 | Wake on RTC | alavanca conhecida, **não acionada** |
 | primeira cópia de backup | 2026-09-28T13:52Z, 14 arquivos, 12,6 MB |
 | instrumentos | `calendario.py` 14/14, `backup.py` 20/20 |
+
+### Fechamento do Adendo 2, parte 9 — o backup mentiu, e o que sobrou de pé
+
+Escrito em 2026-09-28, horas depois da parte 8. **Zero eventos na base.**
+
+#### 24. O autoteste sobrescreveu o status de produção
+
+Horas depois da primeira cópia, o `backup_status.json` da raiz do projeto
+não descrevia o backup. Descrevia **o autoteste**:
+
+| campo | valor encontrado |
+| --- | --- |
+| `quando_utc` | 2026-09-28T13:59:42Z |
+| `origem` | `...\Temp\backup_teste_gqqlgixm\dados` |
+| `destino` | `...\Temp\backup_teste_gqqlgixm\espelho\dados` |
+| `por_que_conta_como_copia` | **"sem justificativa"** |
+| `arquivos_no_destino` | 3 |
+| `bytes_copiados` | 17 |
+| `ok` | **true** |
+
+A cópia real foi às 13:52:59Z. O autoteste rodou às 13:59:42Z e
+sobrescreveu. **O `validacao_contexto.py` teria lido um carimbo de menos
+de 24 h e reportado "backup em dia", sustentado por 17 bytes numa pasta
+temporária.**
+
+É o vazamento do bloco de isolamento do Gate 1b outra vez — o terceiro
+desta família, depois do `CAMINHO_LOG` preso no import e do `>> log` no
+`.bat` — e agora atingindo exatamente o arquivo que o porteiro lê para
+decidir se há cópia.
+
+**Por que o detector não pegou:** o bloco de isolamento tira impressão
+digital de `dados_execucao/`. O `backup_status.json` mora na **raiz do
+projeto**. O detector de vazamento tinha **escopo menor que o
+vazamento** — ele estava funcionando e olhando para o lugar errado.
+
+**E havia contradição interna no próprio registro:** `ok: true` com
+`por_que_conta_como_copia: "sem justificativa"`. O guarda escrito para
+exigir que o destino replique para fora do disco registrou que não havia
+justificativa, e o status dizia que estava tudo bem.
+
+#### O que sobreviveu, e por quê
+
+A cópia real aconteceu: o destino tem **14 arquivos e 12.639.618 bytes**,
+e carrega o **próprio** `backup_status.json`, carimbo 13:52:59Z, com a
+justificativa preenchida.
+
+Sobreviveu porque a cópia do status é escrita **dentro do destino**. Isso
+tinha sido feito para o caso de o disco morrer, e acabou servindo para um
+caso não previsto: o registro local ser corrompido por algo rodando nesta
+máquina.
+
+#### 25. Os quatro consertos
+
+**1. O autoteste não escreve mais em produção.** `caminho_status()` passa
+por `_STATUS_ALT`, que o autoteste redireciona para a pasta temporária. E
+o autoteste ganhou um **bloco 4 de isolamento** que tira impressão de
+`backup_status.json` e `replicacao_confirmada.json` antes e depois, e
+reprova se algo mudou. O instrumento agora testa a si mesmo pelo defeito
+que cometeu.
+
+**2. O escopo do detector do Gate 1b foi ampliado** para os arquivos de
+estado da raiz, não só `dados_execucao/`. É o conserto estrutural: a
+lição não é "o backup vazou", é que **um detector precisa cobrir todo
+lugar onde produção é escrita**.
+
+**3. `ok` passa a exigir justificativa.** Destino sem justificativa de
+cópia externa entra como erro e o status vira `ok: false`. A contradição
+não é mais representável.
+
+**4. A autoridade passou a ser o destino.** `verificar_frescor()` lê o
+status local, descobre o destino, e **lê o status que está dentro do
+backup**. Os dois têm de existir, estar frescos, marcar `ok` e concordar
+sobre o destino. Um status local fresco apontando para um destino sem
+status **reprova** — que é exatamente o estado que o vazamento produziu.
+
+O motivo é geral: o status local mora no disco que pode morrer e pode ser
+escrito por qualquer coisa nesta máquina. O que está dentro do backup,
+não.
+
+#### 26. O buraco conceitual, que era maior que os quatro
+
+`copiar()` prova que os arquivos foram **escritos** na pasta do OneDrive.
+**Não prova que o OneDrive replicou nada.** Cliente pausado, deslogado ou
+sem quota: os arquivos ficam no mesmo disco, o status diz "em dia", e a
+proteção é zero.
+
+É um instrumento afirmando sucesso que não mediu — a família inteira de
+erros deste projeto, na última camada que sobrou.
+
+**Não há como medir isso daqui** sem depender de sinal frágil: atributo
+de arquivo, log do cliente, processo vivo. Nenhum deles prova replicação.
+Então não se finge que mede:
+
+> **Exige-se atestado humano da primeira replicação, por destino.** O
+> atestado é uma **afirmação datada de uma pessoa** que abriu o serviço na
+> web e viu os arquivos lá — não uma medição — e o próprio arquivo de
+> atestado diz isso no campo `natureza`.
+
+`verificar_frescor()` reprova sem atestado. Destino novo exige atestado
+novo. E o comando imprime, antes de gravar, o que a pessoa está afirmando.
+
+**Estado nesta data: o atestado NÃO existe.** O porteiro reprova, e é o
+comportamento correto — ninguém verificou ainda se os arquivos chegaram
+ao servidor. Fica assim até alguém conferir em `onedrive.com` e rodar
+`python backup.py --confirmar-replicacao`.
+
+`backup.py`: **30/30**, incluindo os quatro blocos novos.
+
+#### O que este episódio custou e o que não custou
+
+Não custou dado: os 14 arquivos estão no destino, e a segunda cópia do
+status provou isso. Custou **a confiança no registro local**, por seis
+horas, durante as quais o porteiro teria dito "em dia" sem base.
+
+E vale nomear o que quase aconteceu: a parte 8 deste adendo afirma
+"primeira cópia em 2026-09-28T13:52Z, 14 arquivos, 12,6 MB". Aquela frase
+estava **certa**, mas a prova dela tinha sido destruída minutos depois, e
+ninguém teria notado se o status não morasse também do lado de lá.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-28 |
+| eventos na base nesta data | **zero** |
+| dado perdido | **nenhum** — 14 arquivos, 12.639.618 bytes no destino |
+| registro local | corrompido por 6 h, refeito às 14:08:15Z |
+| autoteste escrevendo em produção | **consertado**, com bloco que prova |
+| escopo do detector do Gate 1b | ampliado à raiz do projeto |
+| `ok` com "sem justificativa" | **impossível** agora |
+| autoridade do frescor | **o status dentro do backup** |
+| replicação de fato | **não verificada**; atestado humano exigido e ausente |
+| `backup.py` | 30/30 |

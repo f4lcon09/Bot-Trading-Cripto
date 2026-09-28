@@ -119,6 +119,21 @@ expõe o snapshot atual. Se o disco morrer, esses dados deixam de existir.
   grita no log se falhar — sem morrer, porque coleta vale mais que
   cópia. E `validacao_contexto.py` **reprova** se a última cópia passar
   de 24 h. CSV impecável num disco só não é dado válido.
+- **A autoridade é o destino.** O frescor é decidido pelo status que
+  mora *dentro* do backup, não pelo da raiz do projeto — esse pode ser
+  sobrescrito por qualquer coisa nesta máquina, e foi, em 28/09/2026.
+- **Replicação exige atestado humano.** O script prova que escreveu os
+  arquivos na pasta local; não prova que o cliente sincronizou. Pausado,
+  deslogado ou sem quota, o resultado é arquivo no mesmo disco com
+  status dizendo "em dia". Então:
+
+```bash
+python backup.py --confirmar-replicacao
+```
+
+  Confira antes em `onedrive.com` que os arquivos estão lá. O atestado é
+  gravado como **afirmação humana, não medição**, e destino novo exige
+  confirmação nova.
 
 ### Museu e análise
 

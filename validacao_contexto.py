@@ -264,7 +264,14 @@ def main(argv):
         reprovados += 1
     except Exception as e:  # noqa: BLE001  (BackupVencido e afins)
         print(f"BACKUP REPROVADO: {e}")
-        print("  Rode:  python backup.py")
+        # A acao depende do motivo. Mandar "rode python backup.py" para
+        # quem precisa CONFIRMAR a replicacao faria a pessoa copiar de
+        # novo e continuar reprovando, sem entender por que.
+        if "confirmou" in str(e) or "atestado" in str(e):
+            print("  Confira na web e rode:  "
+                  "python backup.py --confirmar-replicacao")
+        else:
+            print("  Rode:  python backup.py")
         print("  Os CSVs podem estar impecaveis e ainda assim existir em")
         print("  um disco so. Isto conta como reprovacao.")
         reprovados += 1

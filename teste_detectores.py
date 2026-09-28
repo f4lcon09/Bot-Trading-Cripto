@@ -469,6 +469,28 @@ def main():
     from config import DIR_EXECUCAO
     antes = impressao_do_diretorio(DIR_EXECUCAO)
 
+    # ESCOPO DO DETECTOR DE VAZAMENTO
+    #
+    # Em 28/09/2026 o autoteste do backup sobrescreveu o
+    # `backup_status.json` de PRODUCAO com o de uma copia de 17 bytes
+    # numa pasta temporaria, e o porteiro passou a reportar "backup em
+    # dia" com base nela. Este bloco nao pegou porque vigiava apenas
+    # DIR_EXECUCAO, e o status mora na RAIZ do projeto: o detector de
+    # vazamento tinha escopo MENOR que o vazamento.
+    #
+    # A licao e a mesma do CAMINHO_LOG: nao basta o detector existir, ele
+    # precisa cobrir todo lugar onde producao e escrita.
+    raiz = os.path.dirname(os.path.abspath(DIR_EXECUCAO))
+    estado_raiz = {}
+    for nome in ("backup_status.json", "replicacao_confirmada.json",
+                 "backup.log"):
+        cam = os.path.join(raiz, nome)
+        try:
+            st = os.stat(cam)
+            estado_raiz[cam] = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            estado_raiz[cam] = None
+
     for fn in (teste_agregacao_obrigatoria,
                teste_duplicata, teste_validador_contexto,
                teste_lacuna_contexto, teste_pulso_execucao,
@@ -483,6 +505,19 @@ def main():
             FALHAS.append(fn.__name__)
 
     print(chr(10) + "10. ISOLAMENTO DO PROPRIO TESTE")
+    mudou_raiz = []
+    for cam, ant in estado_raiz.items():
+        try:
+            st = os.stat(cam)
+            dep = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            dep = None
+        if dep != ant:
+            mudou_raiz.append(os.path.basename(cam))
+    checar("nenhum arquivo de estado da RAIZ foi tocado", not mudou_raiz,
+           "; ".join(mudou_raiz) if mudou_raiz
+           else "backup_status.json e afins intactos")
+
     depois = impressao_do_diretorio(DIR_EXECUCAO)
     tocados = sorted(set(depois) - set(antes)) +               sorted(k for k in set(antes) & set(depois) if antes[k] != depois[k])
     checar("nenhum arquivo de producao foi tocado", not tocados,

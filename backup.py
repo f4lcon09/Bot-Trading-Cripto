@@ -76,6 +76,27 @@ NOME_STATUS = "backup_status.json"
 EXCLUIDOS = ("poller.lock",)
 HORAS_MAX = 24
 
+# --------------------------------------------------------------------
+# O BURACO QUE ESTE ARQUIVO NAO PODE FECHAR SOZINHO
+#
+# `copiar()` prova que os arquivos foram ESCRITOS na pasta do OneDrive.
+# Nao prova que o OneDrive REPLICOU nada. Se o cliente estiver pausado,
+# deslogado ou sem quota, os arquivos ficam no mesmo disco, o status diz
+# "em dia", e a protecao e zero.
+#
+# Isso e um instrumento afirmando sucesso que nao mediu - a familia
+# inteira de erros deste projeto, na ultima camada que sobrou.
+#
+# Nao ha como medir daqui sem depender de sinal fragil (atributo de
+# arquivo, log do cliente, processo vivo). Entao nao se finge que mede:
+# exige-se ATESTADO HUMANO da primeira replicacao, por destino. O
+# atestado e uma AFIRMACAO DATADA DE UMA PESSOA, nao uma medicao, e o
+# proprio arquivo diz isso.
+#
+#   python backup.py --confirmar-replicacao
+# --------------------------------------------------------------------
+NOME_ATESTADO = "replicacao_confirmada.json"
+
 
 class BackupInvalido(Exception):
     """Destino ausente, no mesmo disco, ou dentro do proprio projeto."""
@@ -93,6 +114,21 @@ def iso(dt):
     return dt.replace(microsecond=0).isoformat()
 
 
+# Redirecionamento do status, usado SO pelo autoteste.
+#
+# Em 28/09/2026 o autoteste sobrescreveu o status de PRODUCAO com o de
+# uma copia de 17 bytes numa pasta temporaria, e o porteiro passou a
+# reportar "backup em dia" com base nela. O bloco de isolamento do Gate
+# 1b nao pegou porque ele tira impressao de dados_execucao/, e o status
+# mora na raiz do projeto: o detector de vazamento tinha escopo MENOR
+# que o vazamento.
+#
+# E a terceira vez neste projeto que um caminho e resolvido de um jeito
+# e escrito de outro - depois do CAMINHO_LOG preso no import e do
+# `>> log` no .bat.
+_STATUS_ALT = None
+
+
 def caminho_status():
     """No projeto, FORA de dados_execucao.
 
@@ -100,8 +136,15 @@ def caminho_status():
     ali muda durante o teste. Um status escrito dentro dele faria o
     proprio backup reprovar o gate de isolamento.
     """
+    if _STATUS_ALT:
+        return _STATUS_ALT
     return os.path.join(os.path.dirname(os.path.abspath(DIR_EXECUCAO)),
                         NOME_STATUS)
+
+
+def caminho_atestado():
+    """Ao lado do status: a confirmacao humana de que a replicacao ocorreu."""
+    return os.path.join(os.path.dirname(caminho_status()), NOME_ATESTADO)
 
 
 def destino():
@@ -255,8 +298,17 @@ def copiar(origem=None, dest=None, verificar_digest=True):
         "bytes_copiados": bytes_copiados,
         "faltando_no_destino": faltando,
         "erros": erros,
-        "ok": not erros and not faltando,
     }
+    # `ok` EXIGE justificativa. Um status com "sem justificativa" e
+    # ok=true seria contradicao interna: o guarda registrou que o destino
+    # nao se justifica como copia externa, e o registro dizia que estava
+    # tudo bem. Aconteceu em 28/09/2026, quando o autoteste - que roda
+    # com o guarda desligado - escreveu no status de producao.
+    if status["por_que_conta_como_copia"] == "sem justificativa":
+        erros.append(
+            "destino sem justificativa de copia externa: nao esta em outro "
+            "volume nem sob raiz sincronizada declarada pelo sistema")
+    status["ok"] = not erros and not faltando
     with open(caminho_status(), "w", encoding="utf-8") as f:
         json.dump(status, f, ensure_ascii=False, indent=2)
     # Uma segunda copia do status VAI para o destino, para que a pasta de
@@ -286,13 +338,68 @@ def ler_status():
         return None
 
 
-def verificar_frescor(horas_max=HORAS_MAX):
+def confirmar_replicacao(quem="", dest=None):
+    """
+    Grava o atestado humano de que a replicacao para fora do disco ocorreu.
+
+    NAO e medicao. E a afirmacao datada de uma pessoa que abriu o
+    servico na web e viu os arquivos la. Fica escrito no proprio
+    atestado para que ninguem confunda as duas coisas depois.
+    """
+    alvo = os.path.join(conferir_destino(dest or destino()),
+                        os.path.basename(os.path.abspath(DIR_EXECUCAO)))
+    at = {
+        "destino": alvo,
+        "quando_utc": iso(agora()),
+        "quem": quem or os.environ.get("USERNAME", "nao informado"),
+        "natureza": "AFIRMACAO HUMANA, NAO MEDICAO",
+        "o_que_foi_conferido": (
+            "abri o servico de sincronizacao na web, entrei na pasta de "
+            "destino e vi os arquivos de contexto la - fora deste disco"),
+    }
+    with open(caminho_atestado(), "w", encoding="utf-8") as f:
+        json.dump(at, f, ensure_ascii=False, indent=2)
+    return at
+
+
+def ler_atestado():
+    try:
+        with open(caminho_atestado(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def exigir_atestado(alvo):
+    """Levanta BackupVencido se ninguem confirmou a replicacao DESTE destino."""
+    at = ler_atestado()
+    if at is None:
+        raise BackupVencido(
+            f"ninguem confirmou que a replicacao para fora do disco "
+            f"ocorreu. Os arquivos estao em {alvo}, mas isso prova apenas "
+            f"que foram ESCRITOS ali - nao que o cliente de sincronizacao "
+            f"os enviou. Confira na web e rode: "
+            f"python backup.py --confirmar-replicacao")
+    if os.path.normcase(at.get("destino", "")) != os.path.normcase(alvo):
+        raise BackupVencido(
+            f"o atestado existente e para {at.get('destino')!r}, e o destino "
+            f"atual e {alvo!r}. Destino novo exige confirmacao nova.")
+    return at
+
+
+def verificar_frescor(horas_max=HORAS_MAX, exigir_replicacao=True):
     """
     (ok, mensagem). Levanta BackupVencido se passou do prazo.
 
     Chamada pelo `validacao_contexto.py` e registrada pelo poller na
     subida. Ausencia de status conta como VENCIDO, nunca como zero:
     nunca ter copiado e o pior caso, nao o caso neutro.
+
+    A AUTORIDADE E O DESTINO, nao o status local. O status local mora no
+    disco que pode morrer e pode ser sobrescrito por qualquer coisa que
+    rode nesta maquina - foi o que o autoteste fez em 28/09/2026. O
+    status que vale e o que esta DENTRO da pasta de backup: se ele nao
+    existir ou discordar, isto reprova.
     """
     s = ler_status()
     if s is None:
@@ -313,9 +420,52 @@ def verificar_frescor(horas_max=HORAS_MAX):
             f"ultima copia em {s['quando_utc']} - "
             f"{idade.total_seconds() / 3600:.1f} h atras, limite "
             f"{horas_max} h. Os dados de hoje nao tem copia.")
+
+    # --- a autoridade e o DESTINO ---------------------------------
+    alvo = s.get("destino") or ""
+    if not alvo:
+        raise BackupVencido("o status local nao diz qual e o destino")
+    remoto_p = os.path.join(alvo, NOME_STATUS)
+    try:
+        with open(remoto_p, encoding="utf-8") as f:
+            remoto = json.load(f)
+    except (OSError, ValueError) as e:
+        raise BackupVencido(
+            f"o status local diz que copiou para {alvo!r}, mas nao ha "
+            f"{NOME_STATUS} legivel la ({type(e).__name__}). O status que "
+            f"vale e o que mora DENTRO do backup - o local pode ter sido "
+            f"escrito por qualquer coisa nesta maquina.") from e
+    if not remoto.get("ok"):
+        raise BackupVencido(
+            f"o status DENTRO do destino marca falha em "
+            f"{remoto.get('quando_utc')}")
+    if os.path.normcase(remoto.get("destino", "")) != os.path.normcase(alvo):
+        raise BackupVencido(
+            f"o status no destino aponta para {remoto.get('destino')!r}, "
+            f"diferente de {alvo!r}. Os dois registros discordam.")
+    try:
+        quando_r = datetime.fromisoformat(remoto["quando_utc"])
+    except (KeyError, ValueError) as e:
+        raise BackupVencido(
+            f"carimbo ilegivel no status do destino: {e}") from e
+    idade_r = agora() - quando_r
+    if idade_r > timedelta(hours=horas_max):
+        raise BackupVencido(
+            f"o status DENTRO do destino e de {remoto['quando_utc']}, "
+            f"{idade_r.total_seconds() / 3600:.1f} h atras. O local esta "
+            f"fresco e o do destino nao: sinal de que o local foi escrito "
+            f"por algo que nao copiou de verdade.")
+
+    if exigir_replicacao:
+        at = exigir_atestado(alvo)
+        extra = (f"; replicacao confirmada por {at['quem']} em "
+                 f"{at['quando_utc']} (afirmacao humana)")
+    else:
+        extra = "; replicacao NAO exigida nesta chamada"
+
     return True, (f"ultima copia {idade.total_seconds() / 3600:.1f} h "
-                  f"atras, {s['arquivos_no_destino']} arquivos em "
-                  f"{s['destino']}")
+                  f"atras, {remoto.get('arquivos_no_destino')} arquivos em "
+                  f"{alvo}{extra}")
 
 
 # --------------------------------------------------------------------
@@ -337,10 +487,34 @@ def _recusa(fn, exc, rotulo):
     return _ok(False, rotulo, "-> NAO recusou")
 
 
+def _impressao(caminho):
+    try:
+        st = os.stat(caminho)
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
 def autoteste():
+    global _STATUS_ALT
     import tempfile
     r = []
     base = tempfile.mkdtemp(prefix="backup_teste_")
+
+    # ISOLAMENTO, antes de qualquer coisa.
+    #
+    # Em 28/09/2026 este autoteste sobrescreveu o status de PRODUCAO com
+    # o de uma copia de 17 bytes numa pasta temporaria, e o porteiro
+    # passou a reportar "backup em dia" com base nela. O bloco de
+    # isolamento do Gate 1b nao pegou porque ele vigia dados_execucao/, e
+    # o status mora na raiz do projeto - o detector tinha escopo MENOR
+    # que o vazamento.
+    #
+    # Agora o status e REDIRECIONADO para a pasta temporaria, e a
+    # impressao dos arquivos de producao e conferida no fim.
+    prod_status, prod_atestado = caminho_status(), caminho_atestado()
+    antes = (_impressao(prod_status), _impressao(prod_atestado))
+    _STATUS_ALT = os.path.join(base, NOME_STATUS)
     origem = os.path.join(base, "dados")
     os.makedirs(origem)
     for i in range(3):
@@ -378,42 +552,83 @@ def autoteste():
     r.append(_recusa(destino, BackupInvalido, "sem SNIPER_BACKUP_DIR"))
 
     print(chr(10) + "2. FRESCOR: AUSENCIA CONTA COMO VENCIDO")
+    # `real` aqui e o status REDIRECIONADO, nao o de producao.
     real = caminho_status()
-    guardado = None
+    assert base in real, "o status deveria estar redirecionado para o temp"
     if os.path.exists(real):
-        with open(real, encoding="utf-8") as f:
-            guardado = f.read()
         os.remove(real)
-    try:
-        r.append(_recusa(verificar_frescor, BackupVencido,
-                         "sem status nenhum"))
-        for rotulo, dados in (
-                ("copia marcada como falha",
-                 {"quando_utc": iso(agora()), "ok": False,
-                  "erros": ["disco cheio"]}),
-                ("copia de 48 h atras",
-                 {"quando_utc": iso(agora() - timedelta(hours=48)),
-                  "ok": True, "arquivos_no_destino": 3, "destino": "x"}),
-                ("carimbo ilegivel",
-                 {"quando_utc": "ontem", "ok": True})):
-            with open(real, "w", encoding="utf-8") as f:
-                json.dump(dados, f)
-            r.append(_recusa(verificar_frescor, BackupVencido, rotulo))
+    r.append(_recusa(verificar_frescor, BackupVencido, "sem status nenhum"))
+    for rotulo, dados in (
+            ("copia marcada como falha",
+             {"quando_utc": iso(agora()), "ok": False,
+              "erros": ["disco cheio"]}),
+            ("copia de 48 h atras",
+             {"quando_utc": iso(agora() - timedelta(hours=48)),
+              "ok": True, "arquivos_no_destino": 3, "destino": "x"}),
+            ("carimbo ilegivel", {"quando_utc": "ontem", "ok": True}),
+            ("status sem destino",
+             {"quando_utc": iso(agora()), "ok": True})):
         with open(real, "w", encoding="utf-8") as f:
-            json.dump({"quando_utc": iso(agora()), "ok": True,
-                       "arquivos_no_destino": 3, "destino": "x"}, f)
-        ok, msg = verificar_frescor()
-        r.append(_ok(ok, "copia recente e aceita", msg))
-    finally:
-        if guardado is not None:
-            with open(real, "w", encoding="utf-8") as f:
-                f.write(guardado)
-        elif os.path.exists(real):
-            os.remove(real)
+            json.dump(dados, f)
+        r.append(_recusa(verificar_frescor, BackupVencido, rotulo))
+
+    print(chr(10) + "2b. A AUTORIDADE E O DESTINO, NAO O STATUS LOCAL")
+    # Um status local fresco e valido, apontando para um destino que NAO
+    # tem o proprio status, tem de reprovar. E exatamente o estado que o
+    # vazamento de 28/09/2026 produziu: local dizendo "em dia", nada
+    # provando isso do lado do backup.
+    remoto_dir = os.path.join(base, "destino_remoto")
+    os.makedirs(remoto_dir, exist_ok=True)
+    local_fresco = {"quando_utc": iso(agora()), "ok": True,
+                    "arquivos_no_destino": 3, "destino": remoto_dir}
+    with open(real, "w", encoding="utf-8") as f:
+        json.dump(local_fresco, f)
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "local fresco, destino sem status"))
+
+    def _por_status_remoto(dados):
+        with open(os.path.join(remoto_dir, NOME_STATUS), "w",
+                  encoding="utf-8") as f:
+            json.dump(dados, f)
+
+    _por_status_remoto({"quando_utc": iso(agora() - timedelta(hours=48)),
+                        "ok": True, "destino": remoto_dir,
+                        "arquivos_no_destino": 3})
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "local fresco, destino de 48 h"))
+    _por_status_remoto({"quando_utc": iso(agora()), "ok": False,
+                       "destino": remoto_dir, "arquivos_no_destino": 3})
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "destino marca falha"))
+    _por_status_remoto({"quando_utc": iso(agora()), "ok": True,
+                       "destino": os.path.join(base, "outro"),
+                       "arquivos_no_destino": 3})
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "os dois registros discordam do destino"))
+
+    print(chr(10) + "2c. SEM ATESTADO DE REPLICACAO, NAO CONTA")
+    _por_status_remoto({"quando_utc": iso(agora()), "ok": True,
+                       "destino": remoto_dir, "arquivos_no_destino": 3})
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "ninguem confirmou a replicacao"))
+    with open(caminho_atestado(), "w", encoding="utf-8") as f:
+        json.dump({"destino": remoto_dir, "quando_utc": iso(agora()),
+                   "quem": "teste", "natureza": "AFIRMACAO HUMANA"}, f)
+    ok, msg = verificar_frescor()
+    r.append(_ok(ok, "com atestado e os dois status frescos, aceita",
+                 msg.split(";")[0]))
+    with open(caminho_atestado(), "w", encoding="utf-8") as f:
+        json.dump({"destino": os.path.join(base, "mudou"),
+                   "quando_utc": iso(agora()), "quem": "teste"}, f)
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "atestado de OUTRO destino nao serve"))
 
     print(chr(10) + "3. A COPIA COPIA, E NAO APAGA NO DESTINO")
-    # destino noutro "volume" nao da para simular em teste, entao aqui a
-    # conferencia de volume e desligada de proposito e testada acima.
+    # Um segundo volume nao da para simular em teste. Em vez de desligar
+    # o guarda com um stub - que foi o que escondia o defeito de
+    # `ok: true` com "sem justificativa" - o temp e DECLARADO como raiz
+    # sincronizada, pela mesma variavel de ambiente que vale em producao.
+    # Assim o caminho exercitado e o real, guarda incluso.
     dest = os.path.join(base, "espelho")
     os.makedirs(dest)
     alvo = os.path.join(dest, "dados")
@@ -421,8 +636,7 @@ def autoteste():
     def copia():
         return copiar(origem, dest, verificar_digest=True)
 
-    _orig = globals()["conferir_destino"]
-    globals()["conferir_destino"] = lambda d, o=None: os.path.abspath(d)
+    os.environ["OneDrive"] = base
     try:
         s1 = copia()
         r.append(_ok(s1["copiados"] == 3, "copiou os tres arquivos",
@@ -448,8 +662,18 @@ def autoteste():
         r.append(_ok(os.path.exists(os.path.join(alvo, NOME_STATUS)),
                      "o destino carrega o proprio status"))
     finally:
-        globals()["conferir_destino"] = _orig
+        os.environ.pop("OneDrive", None)
+        _STATUS_ALT = None
         shutil.rmtree(base, ignore_errors=True)
+
+    print(chr(10) + "4. ISOLAMENTO: O TESTE NAO TOCOU PRODUCAO")
+    depois = (_impressao(prod_status), _impressao(prod_atestado))
+    r.append(_ok(antes[0] == depois[0],
+                 "backup_status.json de producao intacto",
+                 "antes=%s depois=%s" % (antes[0], depois[0])))
+    r.append(_ok(antes[1] == depois[1],
+                 "replicacao_confirmada.json de producao intacto"))
+    r.append(_ok(_STATUS_ALT is None, "o redirecionamento foi desfeito"))
 
     print(chr(10) + "=" * 62)
     print("%d/%d verificacoes passaram" % (sum(r), len(r)))
@@ -460,6 +684,28 @@ def autoteste():
 def main(argv):
     if "--autoteste" in argv:
         return autoteste()
+    if "--confirmar-replicacao" in argv:
+        print("CONFIRMACAO DE REPLICACAO")
+        print("Isto NAO e uma medicao. E a sua afirmacao, datada, de que")
+        print("voce abriu o servico de sincronizacao NA WEB, entrou na")
+        print("pasta de destino e VIU os arquivos de contexto la.")
+        print("")
+        print("O backup.py sabe que escreveu os arquivos na pasta local.")
+        print("Ele nao tem como saber se o cliente replicou: pausado,")
+        print("deslogado ou sem quota, o resultado e arquivo no mesmo")
+        print("disco com status dizendo 'em dia'. Por isso a confirmacao")
+        print("e humana, e por isso ela fica registrada como humana.")
+        print("")
+        try:
+            at = confirmar_replicacao(quem=" ".join(
+                a for a in argv if not a.startswith("--")))
+        except BackupInvalido as e:
+            print("FALHOU: %s" % e)
+            return 1
+        print("registrado: %s por %s" % (at["quando_utc"], at["quem"]))
+        print("destino:    %s" % at["destino"])
+        print("Se o destino mudar, a confirmacao tera de ser refeita.")
+        return 0
     if "--verificar" in argv:
         try:
             _, msg = verificar_frescor()
