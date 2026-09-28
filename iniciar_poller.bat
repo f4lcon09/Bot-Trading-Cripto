@@ -25,6 +25,26 @@ REM ====================================================================
 cd /d C:\SniperV2
 if errorlevel 1 exit /b 1
 
+REM ====================================================================
+REM DESTINO DO BACKUP - definido AQUI, nao no ambiente do usuario.
+REM
+REM A tarefa do Agendador nao herda variaveis do shell interativo. Sem
+REM esta linha a copia diaria do poller falharia todo dia - ruidosamente,
+REM o que e melhor que em silencio, mas ainda sem copiar nada.
+REM
+REM Fica no .bat em vez de `setx` porque e configuracao DESTE projeto
+REM nesta maquina, e o .bat e o unico lugar que o Agendador executa.
+REM Mover para o ambiente do usuario tornaria invisivel de onde vem.
+REM
+REM G: e a letra do cliente do Google Drive em modo streaming. A escolha
+REM e deliberada: se o cliente estiver fechado, deslogado ou travado, a
+REM letra SOME e o backup quebra na hora. Uma pasta sincronizada dentro
+REM de C: continuaria existindo como pasta comum, a copia "funcionaria",
+REM o status diria ok, e nada replicaria. O destino que quebra alto e o
+REM que satisfaz a invariante 11 por construcao.
+REM ====================================================================
+set "SNIPER_BACKUP_DIR=G:\Meu Drive\SniperV2_backup"
+
 "C:\Users\User\AppData\Local\Programs\Python\Python314\python.exe" -u "C:\SniperV2\coletor_contexto.py"
 
 exit /b %ERRORLEVEL%

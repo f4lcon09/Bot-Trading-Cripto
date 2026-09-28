@@ -98,23 +98,39 @@ máquina ficar ligada; a saída real é hospedar o poller fora dela.
 ### Backup — o único ativo que não volta
 
 ```bash
-set SNIPER_BACKUP_DIR=C:\Users\User\OneDrive\SniperV2_backup
+set SNIPER_BACKUP_DIR=G:\Meu Drive\SniperV2_backup
 python backup.py              # cópia aditiva
 python backup.py --verificar  # só confere o frescor
 ```
+
+O poller define essa variável no próprio `iniciar_poller.bat` — a tarefa
+do Agendador não herda o ambiente do shell, e sem isso a cópia diária
+falharia todo dia.
 
 Os museus voltam com dois comandos. **`dados_execucao/` não volta com
 nenhum** — a Binance retém `openInterestHist` por 1 mês, a Hyperliquid só
 expõe o snapshot atual. Se o disco morrer, esses dados deixam de existir.
 
+- **Destino em volume distinto, e isso é escolha de modo de falha.**
+  `G:` é a letra do Google Drive em modo streaming. Se o cliente estiver
+  fechado, deslogado ou travado, **a letra some e o backup quebra na
+  hora**. Uma pasta sincronizada dentro de `C:` continuaria existindo
+  como pasta comum: a cópia "funcionaria", o status diria `ok: true`, e
+  nada replicaria — silêncio, que é o que a invariante 11 proíbe. E há um
+  modo de falha que nem o atestado pega: **quota estourada**. O cliente
+  para de sincronizar, a pasta em `C:` continua lá, e haveria até 30 dias
+  de cópia imaginária. `G:` não tem esse estado: ou a letra existe e
+  replica, ou some e o backup quebra.
 - **Aditivo, nunca espelho.** Arquivo removido na origem permanece no
   destino. Espelho propaga exclusão, e numa série que só cresce isso é
   uma forma de perder tudo com um comando.
 - **Recusa destino que não protege**: inexistente, dentro da origem, ou
   no mesmo volume — este último *exceto* sob raiz sincronizada declarada
-  pelo sistema (`%OneDrive%`). A permissão é por variável de ambiente,
-  nunca por nome de pasta: uma pasta batizada "OneDrive" que ninguém
-  sincroniza não replica nada.
+  pelo sistema (`%OneDrive%`). O mecanismo de raiz sincronizada continua
+  no código porque resolve o caso geral de qualquer provedor que funcione
+  assim; o que saiu foi a configuração, não a lição. O volume é perguntado
+  ao sistema por `st_dev`, não deduzido da string: uma pasta batizada
+  "Google Drive" em `C:` tem letra `C:` e não replica nada.
 - **Falha ruidosa (invariante 11).** O poller copia uma vez por dia e
   grita no log se falhar — sem morrer, porque coleta vale mais que
   cópia. E `validacao_contexto.py` **reprova** se a última cópia passar

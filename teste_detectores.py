@@ -536,6 +536,81 @@ def teste_atestado_vence():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def teste_destino_ausente_reprova():
+    """
+    Com o destino ausente, o backup REPROVA - nao cria a pasta.
+
+    E a vantagem inteira do destino em modo streaming. A letra `G:` do
+    cliente do Google Drive so existe enquanto o cliente roda: fechado,
+    deslogado ou travado, a letra some e o backup quebra na hora,
+    ruidosamente.
+
+    Compare com uma pasta sincronizada dentro de C:. Se aquele cliente
+    morrer, a pasta continua existindo como pasta comum. A copia
+    "funciona", o status diz ok: true, e nada replica. E silencio - o
+    modo de falha que a invariante 11 proibe.
+
+    Ou seja: o comportamento que da a vantagem e RECUSAR em vez de
+    criar. Se alguem acrescentar um os.makedirs na raiz do destino numa
+    refatoracao, o silencio volta - e este bloco reprova antes disso.
+    """
+    print(chr(10) + "9c. DESTINO AUSENTE REPROVA, E NAO CRIA A PASTA")
+    import string
+
+    import backup
+    from config import DIR_EXECUCAO
+
+    # (a) caminho inexistente dentro de um volume que existe
+    raiz_real = os.environ.get("SNIPER_BACKUP_DIR") or os.path.dirname(
+        os.path.abspath(DIR_EXECUCAO))
+    fantasma = os.path.join(raiz_real, "_NAO_EXISTE_teste_gate1b")
+    if os.path.isdir(fantasma):
+        checar("o caminho de teste nao deveria existir", False, fantasma)
+    else:
+        try:
+            backup.conferir_destino(fantasma)
+            checar("destino inexistente e recusado", False, "aceitou")
+        except backup.BackupInvalido:
+            checar("destino inexistente e recusado", True, "BackupInvalido")
+        checar("e NAO foi criado pela verificacao",
+               not os.path.isdir(fantasma), os.path.basename(fantasma))
+        try:
+            backup.copiar(dest=fantasma)
+            checar("copiar() tambem recusa", False, "copiou para lugar nenhum")
+        except (backup.BackupInvalido, backup.BackupVencido):
+            checar("copiar() tambem recusa", True)
+        checar("e copiar() NAO criou a pasta",
+               not os.path.isdir(fantasma),
+               "um os.makedirs aqui traria o silencio de volta")
+
+    # (b) volume inteiro ausente - o caso do cliente fechado
+    livre = None
+    for L in reversed(string.ascii_uppercase):
+        if not os.path.exists(L + ":" + os.sep):
+            livre = L
+            break
+    if livre is None:
+        checar("nenhuma letra livre para simular volume ausente", True,
+               "pulado neste host")
+    else:
+        sumido = livre + ":" + os.sep + "SniperV2_backup"
+        try:
+            backup.conferir_destino(sumido)
+            checar("volume ausente e recusado", False, "aceitou " + sumido)
+        except backup.BackupInvalido:
+            checar("volume ausente e recusado", True, sumido)
+
+    # (c) o volume atual do backup e mesmo distinto, perguntado ao sistema
+    st = os.environ.get("SNIPER_BACKUP_DIR")
+    if st and os.path.isdir(st):
+        checar("o destino configurado esta em volume distinto",
+               not backup.mesmo_volume(st, DIR_EXECUCAO),
+               backup.justificativa_destino(st))
+    else:
+        checar("SNIPER_BACKUP_DIR definida e existente", False,
+               "nao ha destino configurado nesta sessao")
+
+
 def main():
     print("GATE 1b - cada detector consegue disparar?")
     print("Nao basta ficar quieto: um detector que nunca disparou em teste")
@@ -573,6 +648,7 @@ def main():
             estado_raiz[cam] = None
 
     for fn in (teste_agregacao_obrigatoria, teste_atestado_vence,
+               teste_destino_ausente_reprova,
                teste_duplicata, teste_validador_contexto,
                teste_lacuna_contexto, teste_pulso_execucao,
                teste_mercado_invalido, teste_invariante10,

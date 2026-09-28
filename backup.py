@@ -182,6 +182,25 @@ def destino():
 VARS_NUVEM = ("OneDrive", "OneDriveConsumer", "OneDriveCommercial")
 
 
+def mesmo_volume(a, b):
+    """
+    True se `a` e `b` estao no MESMO volume, perguntado ao SISTEMA.
+
+    O sinal primario e `st_dev`, que vem do sistema de arquivos. A letra
+    do caminho e secundaria e sozinha nao basta: uma pasta chamada
+    "Google Drive" em C: tem a letra C: e nao replica nada, e um ponto de
+    montagem pode ter letra propria com o mesmo volume por baixo.
+
+    Se nao der para perguntar ao sistema, a resposta conservadora e
+    "mesmo volume" - que EXIGE justificativa extra em vez de dispensar.
+    """
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return (os.path.splitdrive(os.path.abspath(a))[0].upper()
+                == os.path.splitdrive(os.path.abspath(b))[0].upper())
+
+
 def raiz_nuvem(caminho):
     """(nome_da_var, raiz) se `caminho` esta sob raiz sincronizada, ou None."""
     c = os.path.abspath(caminho).rstrip(os.sep)
@@ -217,17 +236,17 @@ def conferir_destino(d, origem=None):
     if d_abs == origem or d_abs.startswith(origem + os.sep):
         raise BackupInvalido(
             f"destino {d_abs!r} esta DENTRO da origem. Isso nao e copia.")
-    if os.path.splitdrive(d_abs)[0].upper() == \
-            os.path.splitdrive(origem)[0].upper():
+    if mesmo_volume(d_abs, origem):
         nuvem = raiz_nuvem(d_abs)
         if nuvem is None:
             raise BackupInvalido(
-                f"destino esta no mesmo volume da origem "
-                f"({os.path.splitdrive(d_abs)[0]}) e nao esta sob raiz "
-                f"sincronizada. Backup no mesmo disco nao protege contra o "
-                f"risco declarado, que e o disco morrer. Use pasta "
-                f"sincronizada com a nuvem ({', '.join(VARS_NUVEM)}) ou "
-                f"outro volume.")
+                f"destino esta no MESMO VOLUME da origem "
+                f"({os.path.splitdrive(d_abs)[0]}, st_dev igual) e nao esta "
+                f"sob raiz sincronizada. Backup no mesmo disco nao protege "
+                f"contra o risco declarado, que e o disco morrer. Use um "
+                f"volume distinto - como a letra de um cliente em modo "
+                f"streaming - ou pasta sincronizada declarada pelo sistema "
+                f"({', '.join(VARS_NUVEM)}).")
     return d_abs
 
 
@@ -235,9 +254,9 @@ def justificativa_destino(d, origem=None):
     """Por que este destino conta como copia. Vai para o status."""
     d_abs = os.path.abspath(d)
     origem = os.path.abspath(origem or DIR_EXECUCAO)
-    if os.path.splitdrive(d_abs)[0].upper() != \
-            os.path.splitdrive(origem)[0].upper():
-        return f"volume distinto ({os.path.splitdrive(d_abs)[0]})"
+    if not mesmo_volume(d_abs, origem):
+        return (f"volume distinto ({os.path.splitdrive(d_abs)[0]}), "
+                f"confirmado por st_dev")
     nuvem = raiz_nuvem(d_abs)
     if nuvem:
         return f"mesmo volume, sob raiz sincronizada {nuvem[0]}={nuvem[1]}"
