@@ -545,6 +545,17 @@ class Coletor:
             s = backup.copiar()
             aviso(f"[{humano(agora_ms())}] backup ok: "
                   f"{s['arquivos_no_destino']} arquivos em {s['destino']}")
+            # A copia ter funcionado nao diz que a REPLICACAO esta valida:
+            # o atestado humano vence em 30 dias, e o porteiro so e
+            # consultado quando alguem o roda. Aqui o poller avisa
+            # sozinho, todo dia, enquanto o prazo corre.
+            try:
+                _, msg = backup.verificar_frescor()
+                if "ATENCAO" in msg:
+                    aviso(f"[{humano(agora_ms())}] {msg}")
+            except Exception as e:  # noqa: BLE001
+                aviso(f"[{humano(agora_ms())}] BACKUP SEM REPLICACAO "
+                      f"VALIDA: {e}")
         except Exception as e:  # noqa: BLE001
             # Grita e segue. E deixa o dia marcado como tentado para nao
             # entrar em laco de falha a cada minuto.

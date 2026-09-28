@@ -134,6 +134,11 @@ python backup.py --confirmar-replicacao
   Confira antes em `onedrive.com` que os arquivos estão lá. O atestado é
   gravado como **afirmação humana, não medição**, e destino novo exige
   confirmação nova.
+- **O atestado vence em 30 dias.** Ele resolve "ninguém verificou nunca";
+  sem prazo não resolveria "alguém verificou uma vez, em março" — a
+  sincronização pode parar depois da confirmação e o arquivo continuaria
+  aprovando. O poller avisa no log quando faltam 7 dias. Gate 1b injeta
+  um atestado de 40 dias e exige reprovação.
 
 ### Museu e análise
 

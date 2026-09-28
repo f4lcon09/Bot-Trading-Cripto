@@ -455,6 +455,87 @@ def teste_agregacao_obrigatoria():
         checar("julgar() recusa gate sem unidade declarada", True)
 
 
+def teste_atestado_vence():
+    """
+    O atestado de replicacao do backup VENCE, e o vencimento dispara.
+
+    Atestado sem prazo resolve "ninguem verificou nunca" e nao resolve
+    "alguem verificou uma vez, em marco". O cliente de sincronizacao pode
+    ser pausado, deslogado ou perder a conta DEPOIS da confirmacao: o
+    arquivo continua la, o porteiro continua aprovando, e a replicacao
+    parou meses atras. Afirmacao pontual tratada como garantia continua -
+    o defeito que este projeto passou a semana cacando, na camada que
+    protege o unico ativo irrecuperavel.
+
+    ISOLAMENTO: este bloco redireciona o status E o atestado para uma
+    pasta temporaria via `_STATUS_ALT`. Escrever o atestado de producao
+    aqui seria repetir exatamente o vazamento de 28/09/2026 - e o bloco
+    10 confere que nao foi.
+    """
+    print(chr(10) + "9b. O ATESTADO DE REPLICACAO VENCE")
+    import json
+    import shutil
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+
+    import backup
+
+    base = tempfile.mkdtemp(prefix="atestado_teste_")
+    salvo = backup._STATUS_ALT
+    try:
+        backup._STATUS_ALT = os.path.join(base, backup.NOME_STATUS)
+        remoto = os.path.join(base, "destino")
+        os.makedirs(remoto, exist_ok=True)
+        agora = datetime.now(timezone.utc)
+
+        def iso(dt):
+            return dt.replace(microsecond=0).isoformat()
+
+        with open(backup.caminho_status(), "w", encoding="utf-8") as f:
+            json.dump({"quando_utc": iso(agora), "ok": True,
+                       "destino": remoto, "arquivos_no_destino": 3}, f)
+        with open(os.path.join(remoto, backup.NOME_STATUS), "w",
+                  encoding="utf-8") as f:
+            json.dump({"quando_utc": iso(agora), "ok": True,
+                       "destino": remoto, "arquivos_no_destino": 3}, f)
+
+        def atestar(dias):
+            with open(backup.caminho_atestado(), "w", encoding="utf-8") as f:
+                json.dump({"destino": remoto, "quem": "gate1b",
+                           "quando_utc": iso(agora - timedelta(days=dias)),
+                           "validade_dias": backup.DIAS_ATESTADO}, f)
+
+        atestar(40)
+        try:
+            backup.verificar_frescor()
+            checar("atestado de 40 dias REPROVA", False,
+                   "aprovou um atestado vencido")
+        except backup.BackupVencido as e:
+            checar("atestado de 40 dias REPROVA", "venceu" in str(e),
+                   "BackupVencido")
+
+        atestar(2)
+        try:
+            ok, _ = backup.verificar_frescor()
+            checar("atestado de 2 dias APROVA", ok)
+        except backup.BackupVencido as e:
+            checar("atestado de 2 dias APROVA", False, str(e)[:60])
+
+        os.remove(backup.caminho_atestado())
+        try:
+            backup.verificar_frescor()
+            checar("sem atestado REPROVA", False)
+        except backup.BackupVencido:
+            checar("sem atestado REPROVA", True)
+
+        checar("a validade declarada e de %d dias" % backup.DIAS_ATESTADO,
+               backup.DIAS_ATESTADO > 0 and backup.DIAS_ATESTADO <= 90,
+               "%d dias" % backup.DIAS_ATESTADO)
+    finally:
+        backup._STATUS_ALT = salvo
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     print("GATE 1b - cada detector consegue disparar?")
     print("Nao basta ficar quieto: um detector que nunca disparou em teste")
@@ -491,7 +572,7 @@ def main():
         except OSError:
             estado_raiz[cam] = None
 
-    for fn in (teste_agregacao_obrigatoria,
+    for fn in (teste_agregacao_obrigatoria, teste_atestado_vence,
                teste_duplicata, teste_validador_contexto,
                teste_lacuna_contexto, teste_pulso_execucao,
                teste_mercado_invalido, teste_invariante10,

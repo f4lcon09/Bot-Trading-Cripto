@@ -97,6 +97,24 @@ HORAS_MAX = 24
 # --------------------------------------------------------------------
 NOME_ATESTADO = "replicacao_confirmada.json"
 
+# O ATESTADO VENCE, e isto nao e burocracia.
+#
+# Atestado sem prazo resolve "ninguem verificou nunca" e NAO resolve
+# "alguem verificou uma vez, em marco". O cliente de sincronizacao pode
+# ser pausado, deslogado, estourar quota ou perder a vinculacao da conta
+# a qualquer momento DEPOIS da confirmacao. O arquivo continua la, o
+# porteiro continua aprovando, e a replicacao parou meses atras.
+#
+# E uma afirmacao pontual tratada como garantia continua - a forma exata
+# do defeito que este projeto passou a semana cacando, agora na camada
+# que protege o unico ativo irrecuperavel.
+#
+# Trinta dias converte "verificado uma vez" em "verificado
+# periodicamente", que e a unica forma honesta de afirmar uma
+# propriedade que muda sozinha. Custa dez segundos por mes.
+DIAS_ATESTADO = 30
+DIAS_AVISO_ATESTADO = 7
+
 
 class BackupInvalido(Exception):
     """Destino ausente, no mesmo disco, ou dentro do proprio projeto."""
@@ -348,11 +366,18 @@ def confirmar_replicacao(quem="", dest=None):
     """
     alvo = os.path.join(conferir_destino(dest or destino()),
                         os.path.basename(os.path.abspath(DIR_EXECUCAO)))
+    agora_ = agora()
     at = {
         "destino": alvo,
-        "quando_utc": iso(agora()),
+        "quando_utc": iso(agora_),
+        "vence_em_utc": iso(agora_ + timedelta(days=DIAS_ATESTADO)),
+        "validade_dias": DIAS_ATESTADO,
         "quem": quem or os.environ.get("USERNAME", "nao informado"),
         "natureza": "AFIRMACAO HUMANA, NAO MEDICAO",
+        "por_que_vence": (
+            "a sincronizacao pode ser pausada, deslogada, estourar quota ou "
+            "perder a vinculacao da conta DEPOIS desta confirmacao. Sem "
+            "prazo, uma afirmacao pontual viraria garantia continua."),
         "o_que_foi_conferido": (
             "abri o servico de sincronizacao na web, entrei na pasta de "
             "destino e vi os arquivos de contexto la - fora deste disco"),
@@ -384,6 +409,21 @@ def exigir_atestado(alvo):
         raise BackupVencido(
             f"o atestado existente e para {at.get('destino')!r}, e o destino "
             f"atual e {alvo!r}. Destino novo exige confirmacao nova.")
+    try:
+        quando = datetime.fromisoformat(at["quando_utc"])
+    except (KeyError, ValueError) as e:
+        raise BackupVencido(f"carimbo ilegivel no atestado: {e}") from e
+    idade = agora() - quando
+    limite = timedelta(days=at.get("validade_dias") or DIAS_ATESTADO)
+    if idade > limite:
+        raise BackupVencido(
+            f"o atestado de replicacao venceu: confirmado em "
+            f"{at['quando_utc']}, {idade.days} dias atras, validade de "
+            f"{limite.days} dias. A sincronizacao pode ter parado desde "
+            f"entao - confirmacao pontual nao e garantia continua. "
+            f"Confira na web e rode: python backup.py "
+            f"--confirmar-replicacao")
+    at["_dias_restantes"] = (limite - idade).days
     return at
 
 
@@ -458,8 +498,13 @@ def verificar_frescor(horas_max=HORAS_MAX, exigir_replicacao=True):
 
     if exigir_replicacao:
         at = exigir_atestado(alvo)
+        faltam = at.get("_dias_restantes")
         extra = (f"; replicacao confirmada por {at['quem']} em "
-                 f"{at['quando_utc']} (afirmacao humana)")
+                 f"{at['quando_utc']} (afirmacao humana, "
+                 f"{faltam} dia(s) de validade)")
+        if faltam is not None and faltam <= DIAS_AVISO_ATESTADO:
+            extra += (" -- ATENCAO: reconfirme antes de vencer, ou o "
+                      "porteiro vai reprovar")
     else:
         extra = "; replicacao NAO exigida nesta chamada"
 
@@ -622,6 +667,45 @@ def autoteste():
                    "quando_utc": iso(agora()), "quem": "teste"}, f)
     r.append(_recusa(verificar_frescor, BackupVencido,
                      "atestado de OUTRO destino nao serve"))
+
+    print(chr(10) + "2d. O ATESTADO VENCE")
+    # "alguem verificou uma vez, em marco" tem de reprovar igual a
+    # "ninguem verificou nunca". A sincronizacao pode parar depois da
+    # confirmacao, e o arquivo de atestado nao sabe disso.
+    def _atesta(dias_atras, **kw):
+        d = {"destino": remoto_dir, "quem": "teste",
+             "quando_utc": iso(agora() - timedelta(days=dias_atras)),
+             "validade_dias": DIAS_ATESTADO}
+        d.update(kw)
+        with open(caminho_atestado(), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+
+    _atesta(40)
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "atestado de 40 dias atras"))
+    _atesta(31)
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "atestado de 31 dias atras"))
+    _atesta(29)
+    ok, msg = verificar_frescor()
+    r.append(_ok(ok, "atestado de 29 dias ainda vale",
+                 "restam %s dia(s)"
+                 % exigir_atestado(remoto_dir).get("_dias_restantes")))
+    _atesta(25)
+    _, msg = verificar_frescor()
+    r.append(_ok("ATENCAO" in msg, "avisa quando faltam <= %d dias"
+                 % DIAS_AVISO_ATESTADO))
+    _atesta(1)
+    _, msg = verificar_frescor()
+    r.append(_ok("ATENCAO" not in msg, "nao avisa quando esta longe de vencer"))
+    _atesta(0, quando_utc="ontem")
+    r.append(_recusa(verificar_frescor, BackupVencido,
+                     "carimbo ilegivel no atestado"))
+    # e um atestado gravado agora carrega o prazo escrito nele
+    _atesta(0)
+    at_novo = ler_atestado()
+    r.append(_ok(at_novo.get("validade_dias") == DIAS_ATESTADO,
+                 "o atestado carrega a propria validade"))
 
     print(chr(10) + "3. A COPIA COPIA, E NAO APAGA NO DESTINO")
     # Um segundo volume nao da para simular em teste. Em vez de desligar

@@ -1543,3 +1543,92 @@ ninguém teria notado se o status não morasse também do lado de lá.
 | autoridade do frescor | **o status dentro do backup** |
 | replicação de fato | **não verificada**; atestado humano exigido e ausente |
 | `backup.py` | 30/30 |
+
+### Fechamento do Adendo 2, parte 10 — o atestado vence
+
+Escrito em 2026-09-28. **Zero eventos na base.**
+
+#### 27. Afirmação pontual não é garantia contínua
+
+O atestado humano da parte 9 resolve *"ninguém verificou nunca"*. **Não
+resolve *"alguém verificou uma vez, em março"*.**
+
+O cliente de sincronização pode ser pausado, deslogado, estourar quota ou
+perder a vinculação da conta a qualquer momento **depois** da
+confirmação. O `replicacao_confirmada.json` continua lá, o porteiro
+continua aprovando, e a replicação parou meses atrás.
+
+É a forma exata do defeito que este projeto passou a semana caçando — uma
+afirmação pontual tratada como garantia contínua — agora na camada que
+protege o único ativo irrecuperável. A mesma estrutura do
+`blood_toll_pct`, do `0x800710E0` lido como falha, do design effect
+herdado entre janelas: **um valor verdadeiro num instante, aplicado a
+outro instante em que ninguém o reconferiu.**
+
+#### O conserto: o atestado tem prazo
+
+| campo | valor |
+| --- | --- |
+| validade | **30 dias** |
+| aviso antecipado | 7 dias |
+| gravado no atestado | `vence_em_utc`, `validade_dias`, `por_que_vence` |
+
+Passou de 30 dias, `verificar_frescor()` reprova e pede reconfirmação.
+Custa dez segundos por mês, e converte "verificado uma vez" em
+**"verificado periodicamente"** — a única forma honesta de afirmar uma
+propriedade que muda sozinha.
+
+O prazo fica **escrito dentro do próprio atestado**, ao lado do
+`natureza: "AFIRMACAO HUMANA, NAO MEDICAO"`, junto com o motivo. Quem
+abrir o arquivo daqui a um ano lê por que ele vence sem precisar do
+código.
+
+**O poller avisa antes de doer.** Na cópia diária ele consulta o frescor
+e registra no log quando faltam 7 dias ou menos, ou quando a replicação
+já não tem atestado válido. Sem isso o vencimento só apareceria quando
+alguém rodasse o porteiro — e o ponto inteiro é não depender de alguém
+lembrar.
+
+#### O vencimento é provado, não afirmado
+
+`backup.py`: **37/37**, com o bloco `2d` cobrindo atestado de 40 dias, de
+31, de 29, o aviso em 25, a ausência de aviso em 1, carimbo ilegível, e o
+prazo gravado no arquivo.
+
+**Gate 1b, bloco 9b:** injeta um atestado datado de 40 dias atrás e exige
+reprovação; injeta um de 2 dias e exige aprovação; remove o atestado e
+exige reprovação. O vencimento entra na mesma categoria dos outros
+detectores — não basta ele existir, ele precisa **disparar em teste**.
+
+E o bloco 9b redireciona status e atestado para pasta temporária via
+`_STATUS_ALT`. Escrever o atestado de produção ali seria repetir
+literalmente o vazamento de horas antes; o **bloco 10** confere que não
+foi, e conferiu.
+
+#### Estado nesta data
+
+| item | estado |
+| --- | --- |
+| cópia local para `%OneDrive%` | **feita** — 14 arquivos, 12,6 MB |
+| status local | correto, `ok: true` sustentado |
+| status dentro do destino | presente e concordante |
+| **replicação de fato** | **não verificada** |
+| atestado | **não existe** |
+| porteiro | **reprova**, saída 1 |
+
+O porteiro reprovar é o comportamento certo. Até alguém abrir o serviço
+na web, ver os arquivos e rodar `python backup.py
+--confirmar-replicacao`, o projeto tem duas cópias no mesmo disco cuja
+replicação ninguém checou.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-28 |
+| eventos na base nesta data | **zero** |
+| validade do atestado | **30 dias**, aviso em 7 |
+| prova do vencimento | Gate 1b bloco 9b + `backup.py` bloco 2d |
+| isolamento do bloco novo | verificado pelo bloco 10 |
+| `backup.py` | **37/37** |
+| replicação | **ainda não atestada** |
