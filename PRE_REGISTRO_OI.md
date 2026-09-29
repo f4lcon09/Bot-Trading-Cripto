@@ -1904,3 +1904,123 @@ deixa de ser detalhe e passa a ser o que faz o backup automático existir.
 | atestado atual | **apagado**; precisa ser refeito |
 | Wake on RTC | **acionado**, 06:00 locais |
 | `backup.py` | 54/54 |
+
+### Fechamento do Adendo 2, parte 14 — as previsões, verificadas
+
+Escrito em 2026-09-29. **Zero eventos na base.**
+
+#### 38. O ponto cego quebrou
+
+A parte 37 previu que, com despertar por RTC às 06:00 locais, as horas
+`09:00–10:59 UTC` deixariam de estar em zero absoluto. **Confirmado.**
+
+| hora UTC | 28/09 (7 dias) | 29/09 (8 dias) |
+| --- | --- | --- |
+| 09:00 | **0%** | **12%** |
+| 10:00 | **0%** | **12%** |
+| agregado | 48% | **55%** |
+
+`cobertura.py` agora imprime: *"Nenhuma hora com cobertura zero em todos
+os dias."* É a primeira vez que essa linha aparece desde que o
+instrumento existe.
+
+O mecanismo está no log, e o RTC disparou no minuto: a lacuna noturna
+terminou às `08:59 UTC` e a subida do poller está carimbada em
+`29/09 06:00 (29/09 09:00 UTC)`.
+
+#### A métrica de ontem estava frágil, e isto é correção de método
+
+A parte 20 mediu o ponto cego pela **interseção das janelas de falha**,
+como `[maior início, menor fim]`. Recalculada hoje sobre os mesmos
+arquivos, ela devolve **zero minutos** — e não porque o problema sumiu,
+mas porque a fórmula quebra em dois casos que passaram a existir:
+
+- uma janela que **cruza a meia-noite** (22/09, `17:29 → 02:05 UTC`), em
+  que "início" é numericamente maior que "fim";
+- uma janela **diurna** (24/09, `17:04 → 19:28 UTC`), que não é parada
+  noturna e não deveria entrar na mesma conta.
+
+A conta servia enquanto havia exatamente uma parada por noite, nenhuma
+cruzando meia-noite. Era **métrica ad hoc apresentada como estrutural**.
+
+A medida correta já existia e é a do `cobertura.py`: **cobertura por hora
+UTC contra o dia de 1440 minutos**, que não depende de as janelas serem
+bem-comportadas. É ela que vale, e é ela que confirma a previsão.
+
+#### 39. O risco mudou de borda, não desapareceu
+
+A parte 20 dizia: *"a borda que produz o ponto cego é justamente a que
+não varia"* — e a borda travada era o fim, porque dependia de alguém
+acordar.
+
+**O RTC inverteu isso.** O fim agora é determinístico às `09:00 UTC`. A
+borda que precisa variar passou a ser o **início** — a hora de desligar.
+
+| noite | desligou (UTC) |
+| --- | --- |
+| 23/09 | 04:22 |
+| 24/09 | 05:09 |
+| 25/09 | 05:44 |
+| 26/09 | 03:54 |
+| 27/09 | 08:49 |
+| 28/09 | 06:26 |
+| 29/09 | 01:52 |
+
+Hoje esse início varia numa faixa de quase sete horas, e é por isso que
+nenhuma hora fica em zero. **Mas se o hábito de desligar se regularizar**
+— sempre por volta das 23:00 locais, por exemplo — a faixa `02:00–09:00
+UTC` vira ponto cego estrutural novo, com o fim travado pelo RTC e o
+início travado pelo hábito.
+
+Fica registrado como **o que observar**, não como problema atual. A
+alavanca disponível, se acontecer, é um segundo despertar por RTC no meio
+da madrugada: ele parte a janela em duas e nenhuma hora fica ausente em
+todas as noites.
+
+#### 40. O backup automático rodou pela primeira vez
+
+Até 28/09 **toda cópia havia sido disparada à mão**, e isso estava
+registrado na parte 11. Hoje o poller copiou sozinho, três vezes:
+
+```
+[29/09 00:00 UTC] backup ok: 16 arquivos em G:\Meu Drive\SniperV2_backup
+[29/09 09:01 UTC] backup ok: 16 arquivos
+[29/09 16:10 UTC] backup ok: 16 arquivos
+```
+
+16 arquivos e não 14 porque o dia 29/09 trouxe o seu `contexto_` e o seu
+`contexto_falhas_`.
+
+E o aviso de replicação dispara em toda cópia, como desenhado: *"BACKUP
+SEM REPLICACAO VALIDA: ninguem confirmou..."*. O atestado foi apagado em
+28/09 e ainda não foi refeito.
+
+#### A retentativa ainda NÃO foi exercitada
+
+A parte 34(b) implementou reagendamento em 10 min para o caso de o `G:`
+ainda não estar montado na subida. **Ela não foi testada em produção.**
+
+- A falha de `28/09 15:52 UTC` ocorreu sob o código **antigo**, que
+  marcava o dia antes de saber o resultado. O sucesso seguinte, às
+  `00:00 UTC`, veio da **virada do dia**, não da retentativa.
+- A subida de hoje às `09:00 UTC` copiou com sucesso em `09:01`, **sem
+  falhar antes**. O `G:` já estava montado.
+
+Ou seja: a corrida existe (aconteceu uma vez), o conserto está no código,
+e **nenhuma execução provou que ele funciona**. Fica assim escrito para
+não ser lido como verificado. Um autoteste para esse caminho é dívida
+declarada.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-29 |
+| eventos na base nesta data | **zero** |
+| horas em zero absoluto | **nenhuma** (eram 09:00–10:59) |
+| cobertura agregada | 48% → **55%** |
+| RTC | disparou às 09:00 UTC, no minuto |
+| métrica de interseção | **retirada** — frágil a janela noturna e a meia-noite |
+| backup automático | **primeira vez**, 3 cópias hoje |
+| retentativa do backup | implementada, **não exercitada** |
+| atestado de replicação | **ausente**; porteiro reprovando |
