@@ -2118,3 +2118,60 @@ este projeto já pagou para aprender.
 | alavanca real | despertar por tarefa agendada, a partir da **suspensão** |
 | interação declarada | o bloqueio de ociosidade impede re-suspender sozinho |
 | atestado de replicação | **ainda ausente** |
+
+### Fechamento do Adendo 2, parte 16 — a dívida da retentativa, paga
+
+Escrito em 2026-09-29. **Zero eventos na base.**
+
+#### 43. A retentativa agora tem prova
+
+A parte 40 registrou que o reagendamento do backup estava implementado e
+**nunca exercitado**: a falha real de `28/09 15:52Z` ocorreu sob o código
+antigo, e a subida de `29/09 09:00Z` copiou de primeira. O conserto
+existia sem que nenhuma execução tivesse passado por ele.
+
+Esperar a próxima corrida seria deixar o instrumento não verificado por
+tempo indefinido — e a corrida pode demorar meses, porque depende de o
+cliente de sincronização montar depois do poller.
+
+**Gate 1b, bloco 9d**, fecha a dívida sem esperar. Ele simula o `G:`
+ausente e faz o relógio andar:
+
+| verificação | exige |
+| --- | --- |
+| falha não marca o dia | o dia inteiro não pode ser perdido por uma falha na subida |
+| falha reagenda em 10 min | o prazo é o declarado |
+| e grita no log | invariante 11 |
+| antes do prazo, não tenta | nada de laço de falha a cada minuto |
+| passado o prazo, tenta | **a retentativa dispara** |
+| destino disponível → copia e fecha o dia | o dia só fecha no sucesso |
+| no mesmo dia não copia de novo | uma cópia por dia |
+| falha não propaga | **coleta vale mais que cópia** |
+
+**Isolamento:** o bloco não instancia `Coletor` pelo construtor — ele
+registra lacuna de subida em produção. Usa `object.__new__` e ajusta os
+dois atributos. E substitui `aviso` e `agora_ms` no módulo, para não
+escrever no `poller.log` real nem depender do relógio de parede. O bloco
+10 confirmou que nada de produção foi tocado.
+
+#### E ele reprova quando o defeito volta
+
+Injetado o defeito original — marcar o dia **antes** de saber o resultado
+— numa cópia do projeto, o Gate 1b reprova com três das verificações do
+bloco 9d caindo: *falha não marca o dia*, *passado o prazo tenta de
+novo*, *e registra o sucesso*.
+
+Não basta o bloco existir; ele precisa distinguir o código certo do
+errado, e distingue.
+
+#### Estado nesta data
+
+| item | estado |
+| --- | --- |
+| atestado de replicação | **assinado**, com `CONFIRMO` digitado |
+| retentativa | implementada **e provada** |
+| horas em zero absoluto | nenhuma — com `n = 1 dia` em 4 das 5 horas |
+| o que falta observar | a faixa `06:00–11:00 UTC` engrossar com repetição |
+
+**Nenhum item em aberto depende de ação humana até o vencimento do
+atestado**, em 2026-10-29. A partir daí, dez segundos por mês.

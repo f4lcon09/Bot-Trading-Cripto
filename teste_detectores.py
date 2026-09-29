@@ -646,6 +646,109 @@ def teste_destino_ausente_reprova():
                "crie destino_backup.txt ou defina SNIPER_BACKUP_DIR")
 
 
+def teste_retentativa_backup():
+    """
+    A retentativa do backup do poller dispara, e o dia so fecha no sucesso.
+
+    Em 28/09/2026 15:52Z o poller subiu e o backup falhou porque o `G:`
+    do cliente de sincronizacao ainda NAO ESTAVA MONTADO - ele monta no
+    logon e o poller sobe antes. Na primeira versao o dia era marcado
+    como tentado ANTES de saber o resultado, entao uma falha na subida
+    matava o backup daquele dia inteiro. Com a maquina desligada toda
+    noite e despertar por RTC, isso seria falha em TODO boot, para
+    sempre, com o log gritando uma vez por dia e nada sendo feito.
+
+    O conserto existe desde 28/09 e ATE AQUI NUNCA FOI EXERCITADO: a
+    falha real ocorreu sob o codigo antigo, e a subida seguinte copiou
+    de primeira. Estava registrado no adendo como divida declarada.
+
+    Este bloco fecha a divida SEM esperar a proxima corrida: simula o
+    `G:` ausente, o relogio andando, e exige o comportamento inteiro.
+
+    ISOLAMENTO: nao instancia Coletor pelo construtor - ele registra
+    lacuna de subida em producao. Usa object.__new__ e ajusta os dois
+    atributos. E substitui `aviso` e `agora_ms` no modulo, para nao
+    escrever no poller.log real nem depender do relogio de parede.
+    """
+    print(chr(10) + "9d. A RETENTATIVA DO BACKUP DISPARA")
+    import backup
+    import coletor_contexto as cc
+
+    col = object.__new__(cc.Coletor)
+    col.parar = False
+    col._backup_feito_em = None
+    col._backup_proxima_tentativa_ms = 0
+
+    msgs = []
+    relogio = [1767000000000]          # 2026-01-01T00:00:00Z, arbitrario
+    orig = (cc.aviso, cc.agora_ms, backup.copiar, backup.verificar_frescor)
+    espera_ms = cc.BACKUP_RETENTATIVA_MIN * 60000
+
+    def falhar(*a, **k):
+        raise backup.BackupInvalido("destino 'G:' nao existe")
+
+    try:
+        cc.aviso = lambda m: msgs.append(m)
+        cc.agora_ms = lambda: relogio[0]
+        backup.verificar_frescor = lambda *a, **k: (True, "teste")
+        backup.copiar = falhar
+
+        # 1. falha na subida: NAO marca o dia, e reagenda
+        col._talvez_backup()
+        checar("falha nao marca o dia como feito",
+               col._backup_feito_em is None,
+               "senao o dia inteiro ficaria sem copia")
+        checar("falha reagenda em %d min" % cc.BACKUP_RETENTATIVA_MIN,
+               col._backup_proxima_tentativa_ms == relogio[0] + espera_ms)
+        checar("e grita no log", any("BACKUP FALHOU" in m for m in msgs))
+
+        # 2. antes do prazo, NAO tenta de novo (nada de laco por minuto)
+        n = len(msgs)
+        relogio[0] += espera_ms - 1000
+        col._talvez_backup()
+        checar("antes do prazo nao tenta de novo", len(msgs) == n,
+               "%d minuto(s) de silencio entre tentativas"
+               % cc.BACKUP_RETENTATIVA_MIN)
+
+        # 3. passado o prazo, tenta de novo - a corrida cura sozinha
+        relogio[0] += 2000
+        col._talvez_backup()
+        checar("passado o prazo, tenta de novo", len(msgs) > n,
+               "%d tentativa(s) registrada(s)" % sum(
+                   1 for m in msgs if "BACKUP FALHOU" in m))
+
+        # 4. quando o G: aparece, a copia vai e o dia fecha
+        backup.copiar = lambda *a, **k: {"arquivos_no_destino": 3,
+                                         "destino": "G:\\teste"}
+        relogio[0] += espera_ms + 1000
+        col._talvez_backup()
+        checar("com o destino disponivel, copia e marca o dia",
+               col._backup_feito_em == cc.dia(relogio[0]),
+               "dia %s" % col._backup_feito_em)
+        checar("e registra o sucesso", any("backup ok" in m for m in msgs))
+
+        # 5. no mesmo dia nao copia de novo, mesmo com o relogio andando
+        n = len(msgs)
+        relogio[0] += 6 * 3600000
+        col._talvez_backup()
+        checar("no mesmo dia nao copia de novo", len(msgs) == n,
+               "uma copia por dia, como desenhado")
+
+        # 6. e a falha NUNCA derruba a coleta
+        backup.copiar = falhar
+        col._backup_feito_em = None
+        col._backup_proxima_tentativa_ms = 0
+        try:
+            col._talvez_backup()
+            checar("falha de backup nao propaga para o laco de coleta", True,
+                   "coleta vale mais que copia")
+        except Exception as e:
+            checar("falha de backup nao propaga para o laco de coleta",
+                   False, "%s escapou" % type(e).__name__)
+    finally:
+        cc.aviso, cc.agora_ms, backup.copiar, backup.verificar_frescor = orig
+
+
 def main():
     print("GATE 1b - cada detector consegue disparar?")
     print("Nao basta ficar quieto: um detector que nunca disparou em teste")
@@ -683,7 +786,7 @@ def main():
             estado_raiz[cam] = None
 
     for fn in (teste_agregacao_obrigatoria, teste_atestado_vence,
-               teste_destino_ausente_reprova,
+               teste_destino_ausente_reprova, teste_retentativa_backup,
                teste_duplicata, teste_validador_contexto,
                teste_lacuna_contexto, teste_pulso_execucao,
                teste_mercado_invalido, teste_invariante10,
