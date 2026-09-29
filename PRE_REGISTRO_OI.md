@@ -2024,3 +2024,97 @@ declarada.
 | backup automático | **primeira vez**, 3 cópias hoje |
 | retentativa do backup | implementada, **não exercitada** |
 | atestado de replicação | **ausente**; porteiro reprovando |
+
+### Fechamento do Adendo 2, parte 15 — o limiar binário, e a alavanca que não existe
+
+Escrito em 2026-09-29. **Zero eventos na base.**
+
+#### 41. "Nenhuma hora com cobertura zero" é verdade e é frágil
+
+A parte 38 celebrou a frase do `cobertura.py`. Ela está correta e
+**esconde que o suporte é de um dia por hora**. Medido:
+
+| hora UTC | local | dias que contribuem | cobertura |
+| --- | --- | --- | --- |
+| 06:00 | 03:00 | 27/09 (60 min), 28/09 (26 min) | 17,9% |
+| 07:00 | 04:00 | **só 27/09** (60 min) | 12,5% |
+| 08:00 | 05:00 | **só 27/09** (49 min) | 10,2% |
+| 09:00 | 06:00 | **só 29/09** (59 min) | 12,3% |
+| 10:00 | 07:00 | **só 29/09** (60 min) | 12,5% |
+
+As horas `09:00` e `10:00` existem **só por causa de hoje**, o primeiro
+dia com RTC. As `07:00` e `08:00` existem **só por causa de 27/09**, uma
+noite atípica em que a máquina ficou ligada até tarde.
+
+**"Zero horas em zero" é um limiar binário sobre uma contagem de dias,
+não uma medida de cobertura.** Ele foi cruzado por um dia. Removido o
+29/09, as horas 09 e 10 voltam a zero.
+
+É o mesmo defeito que a invariante 10 combate em outro lugar: **`n = 1`
+não é medida**. A frase passou a valer com uma observação por hora, e foi
+lida como propriedade estabelecida.
+
+**A leitura honesta:** o mecanismo está provado — o RTC dispara no minuto
+e a coleta começa junto. O **remendo estatístico não existe ainda**. A
+faixa precisa sair de ~12% e chegar perto dos ~80% do resto do dia, e
+isso são semanas de alarme disparando, não uma manhã.
+
+Fica declarado: **a verificação da parte 38 é do mecanismo, não da
+cobertura.** A cobertura se reavalia quando a faixa tiver dias
+suficientes para não depender de nenhum deles em particular.
+
+#### 42. CORRIGIDO: o segundo alarme de RTC não é implementável
+
+A parte 39 registrou, como alavanca disponível, *"um segundo despertar
+por RTC no meio da madrugada"*. **A BIOS tem um alarme só** — não existe
+segundo `Resume By RTC Alarm` nesta placa nem na maioria delas.
+
+Registrar alavanca que não existe é pior que não registrar nada: daqui a
+três meses alguém tenta usá-la e descobre. Fica retirada.
+
+**A alavanca que existe** é o Agendador de Tarefas do Windows: ele não
+liga máquina desligada, mas **acorda da suspensão** — a opção *"Despertar
+o computador para executar esta tarefa"* — e pode ser usada em quantos
+horários se quiser. Isso exige **suspender em vez de desligar**.
+
+#### E ela tem uma interação com o conserto de 28/09 que precisa estar escrita
+
+O `SetThreadExecutionState` com `ES_CONTINUOUS | ES_SYSTEM_REQUIRED`
+**impede a suspensão automática por ociosidade enquanto o poller roda**.
+Consequências, nesta ordem:
+
+1. A máquina **não vai suspender sozinha** à noite. A suspensão teria de
+   ser manual — o que funciona, porque o bloqueio nunca impediu
+   suspensão manual, de propósito.
+2. Depois de um despertar agendado às 03:00, a máquina **não volta a
+   suspender sozinha**, pelo mesmo bloqueio. Ela fica ligada até alguém
+   agir.
+
+Ou seja: **como está, um despertar agendado não parte a madrugada em
+duas — ele encerra a suspensão da noite.** Isso aumenta cobertura e
+aumenta consumo, e não é o que a palavra "partir" sugeria.
+
+Partir de verdade exigiria o poller **liberar o bloqueio** dentro de uma
+janela noturna declarada, para que a máquina pudesse voltar a suspender.
+Isso é **mudança de desenho, não de configuração**, e não está
+autorizada nem implementada. Fica como opção descrita, com o custo
+explícito.
+
+**E há o precedente:** a suspensão foi o modo que produziu o furo de
+25/09, com o processo vivo e a máquina dormindo. O comportamento mudou
+desde então — o bloqueio existe e o log registra se o pedido foi aceito —
+mas trocar desligamento por suspensão reintroduz uma família de falha que
+este projeto já pagou para aprender.
+
+#### Registro de integridade desta parte
+
+| campo | valor |
+| --- | --- |
+| escrito em | 2026-09-29 |
+| eventos na base nesta data | **zero** |
+| "nenhuma hora em zero" | verdade, com **n = 1 dia** em 4 das 5 horas |
+| o que a parte 38 verificou | **o mecanismo**, não a cobertura |
+| segundo alarme de RTC | **retirado** — a BIOS tem um só |
+| alavanca real | despertar por tarefa agendada, a partir da **suspensão** |
+| interação declarada | o bloqueio de ociosidade impede re-suspender sozinho |
+| atestado de replicação | **ainda ausente** |
